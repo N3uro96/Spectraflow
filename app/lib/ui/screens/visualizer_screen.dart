@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
@@ -127,13 +128,7 @@ class _BottomPanel extends StatefulWidget {
 
 class _BottomPanelState extends State<_BottomPanel> {
   int _paletteIndex = 0;
-
-  final List<String> _shaderNames = [
-    'TUNNEL', 'KALEIDOSKOP', 'PLASMA', 'SCHACHBRETT',
-    'FRAKTAL', 'RAYMARCHING', 'FLUID', 'ATTRACTOR',
-  ];
-
-  int _shaderIndex = 0;
+  int _currentSeed  = 0;
 
   final List<Color> _paletteColors = [
     const Color(0xFF6C63FF), const Color(0xFFFF6584),
@@ -141,9 +136,15 @@ class _BottomPanelState extends State<_BottomPanel> {
     const Color(0xFF00D2FF), const Color(0xFFFFD700),
   ];
 
-  void _nextShader() {
+  @override
+  void initState() {
+    super.initState();
+    _currentSeed = Random().nextInt(999999);
+  }
+
+  void _randomizeSeed() {
     setState(() {
-      _shaderIndex = (_shaderIndex + 1) % _shaderNames.length;
+      _currentSeed = Random().nextInt(999999);
     });
   }
 
@@ -157,29 +158,34 @@ class _BottomPanelState extends State<_BottomPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Shader Name + Next Button
+            // Seed Anzeige + Würfel Button
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('SHADER', style: SFTheme.labelSmall),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('SEED', style: SFTheme.labelSmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      '#$_currentSeed',
+                      style: SFTheme.titleMedium.copyWith(
+                        fontFamily: 'monospace',
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ],
+                ),
+                // Würfel Button
                 GestureDetector(
-                  onTap: _nextShader,
+                  onTap: _randomizeSeed,
                   child: GlassContainer(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.all(14),
                     borderRadius: SFTheme.radiusSm,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _shaderNames[_shaderIndex],
-                          style: SFTheme.labelSmall.copyWith(
-                              color: SFTheme.textPrimary),
-                        ),
-                        const SizedBox(width: 8),
-                        Icon(Icons.arrow_forward_ios_rounded,
-                            color: SFTheme.textPrimary, size: 12),
-                      ],
+                    child: Icon(
+                      Icons.casino_rounded,
+                      color: SFTheme.textPrimary,
+                      size: 24,
                     ),
                   ),
                 ),
