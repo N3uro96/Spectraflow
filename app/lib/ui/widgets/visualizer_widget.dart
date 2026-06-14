@@ -3,14 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import '../../core/audio_data_provider.dart';
 import '../../core/dna_generator.dart';
+import '../../core/feedback_state.dart';
 import '../../core/palette_data.dart';
 
 class VisualizerWidget extends StatefulWidget {
   final AudioDataProvider audioData;
   final DNAParams         dna;
   final SFPalette         palette;
-  final VoidCallback?     onTap;        // einfacher Tap   → nächste Palette
-  final VoidCallback?     onDoubleTap;  // Doppel-Tap      → Zufallspalette
+  final VoidCallback?     onTap;
+  final VoidCallback?     onDoubleTap;
 
   const VisualizerWidget({
     super.key,
@@ -28,11 +29,14 @@ class VisualizerWidget extends StatefulWidget {
 class _VisualizerWidgetState extends State<VisualizerWidget>
     with SingleTickerProviderStateMixin {
 
-  ui.FragmentShader? _shader;
-  bool               _loaded = false;
-  String?            _error;
-  Ticker?            _ticker;
-  double             _time = 0.0;
+  ui.FragmentShader?  _shader;
+  bool                _loaded = false;
+  String?             _error;
+  Ticker?             _ticker;
+  double              _time   = 0.0;
+  double              _lastMs = 0.0;
+  ui.Image?           _prevFrame;
+  final FeedbackState _feedback = FeedbackState();
 
   @override
   void initState() {
@@ -43,6 +47,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   @override
   void dispose() {
     _ticker?.dispose();
+    _prevFrame?.dispose();
     super.dispose();
   }
 
@@ -50,18 +55,44 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     try {
       final program = await ui.FragmentProgram.fromAsset(
           'lib/shaders/tunnel_composite.frag');
+
+      // Schwarzes 1×1-Platzhalter-Frame damit sampler2D immer gesetzt ist
+      final rec = ui.PictureRecorder();
+      Canvas(rec).drawRect(
+        const Rect.fromLTWH(0, 0, 1, 1),
+        Paint()..color = const Color(0xFF000000),
+      );
+      final blackFrame = rec.endRecording().toImageSync(1, 1);
+
       setState(() {
-        _shader = program.fragmentShader();
-        _loaded = true;
+        _shader    = program.fragmentShader();
+        _loaded    = true;
+        _prevFrame = blackFrame;
       });
-      _ticker = createTicker((elapsed) {
-        setState(() => _time = elapsed.inMilliseconds / 1000.0);
-      });
+
+      _ticker = createTicker(_onTick);
       _ticker!.start();
     } catch (e) {
       setState(() => _error = e.toString());
       debugPrint('Shader error: $e');
     }
+  }
+
+  void _onTick(Duration elapsed) {
+    final ms = elapsed.inMilliseconds.toDouble();
+    final dt = ((ms - _lastMs) / 1000.0).clamp(0.0, 0.05);
+    _lastMs  = ms;
+    _time    = ms / 1000.0;
+    _feedback.update(widget.dna, widget.audioData, dt, _time);
+    setState(() {});
+  }
+
+  // Aktualisiert _prevFrame nach jedem gerenderten Frame
+  void _onNewFrame(ui.Image newFrame) {
+    final old = _prevFrame;
+    _prevFrame = newFrame;
+    // Skia-Ref-Counting: GPU hält das Bild solange es noch gerastert wird
+    old?.dispose();
   }
 
   @override
@@ -70,7 +101,9 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
       return Center(child: Text('Shader Error:\n$_error',
           style: const TextStyle(color: Colors.red, fontSize: 10)));
     }
-    if (!_loaded || _shader == null) return const SizedBox.expand();
+    if (!_loaded || _shader == null || _prevFrame == null) {
+      return const SizedBox.expand();
+    }
 
     final audio = widget.audioData;
 
@@ -80,18 +113,21 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
       child: RepaintBoundary(
         child: CustomPaint(
           painter: _TunnelPainter(
-            shader:    _shader!,
-            time:      _time,
-            bass:      audio.bassLeft.clamp(0.0, 1.0),
-            mid:       audio.midLeft.clamp(0.0, 1.0),
-            high:      audio.highLeft.clamp(0.0, 1.0),
-            energy:    audio.energy.clamp(0.0, 1.0),
-            bpm:       audio.bpm,
-            stereo:    audio.stereoWidth.clamp(0.0, 1.0),
-            bassLeft:  audio.bassLeft.clamp(0.0, 1.0),
-            bassRight: audio.bassRight.clamp(0.0, 1.0),
-            dna:       widget.dna,
-            palette:   widget.palette,
+            shader:     _shader!,
+            time:       _time,
+            bass:       audio.bassLeft.clamp(0.0, 1.0),
+            mid:        audio.midLeft.clamp(0.0, 1.0),
+            high:       audio.highLeft.clamp(0.0, 1.0),
+            energy:     audio.energy.clamp(0.0, 1.0),
+            bpm:        audio.bpm,
+            stereo:     audio.stereoWidth.clamp(0.0, 1.0),
+            bassLeft:   audio.bassLeft.clamp(0.0, 1.0),
+            bassRight:  audio.bassRight.clamp(0.0, 1.0),
+            dna:        widget.dna,
+            palette:    widget.palette,
+            feedback:   _feedback,
+            prevFrame:  _prevFrame!,
+            onNewFrame: _onNewFrame,
           ),
           size: Size.infinite,
         ),
@@ -101,11 +137,14 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
 }
 
 class _TunnelPainter extends CustomPainter {
-  final ui.FragmentShader shader;
-  final double time, bass, mid, high, energy, bpm, stereo;
-  final double bassLeft, bassRight;
-  final DNAParams dna;
-  final SFPalette palette;
+  final ui.FragmentShader          shader;
+  final double                     time, bass, mid, high, energy, bpm, stereo;
+  final double                     bassLeft, bassRight;
+  final DNAParams                  dna;
+  final SFPalette                  palette;
+  final FeedbackState              feedback;
+  final ui.Image                   prevFrame;
+  final void Function(ui.Image)    onNewFrame;
 
   _TunnelPainter({
     required this.shader,
@@ -120,6 +159,9 @@ class _TunnelPainter extends CustomPainter {
     required this.bassRight,
     required this.dna,
     required this.palette,
+    required this.feedback,
+    required this.prevFrame,
+    required this.onNewFrame,
   });
 
   void _setColor(int idx, Color c) {
@@ -130,6 +172,15 @@ class _TunnelPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    final iw = size.width.toInt();
+    final ih = size.height.toInt();
+    if (iw <= 0 || ih <= 0) return;
+
+    // ── Offscreen-Render (für Frame-Capture) ──────────────
+    final recorder  = ui.PictureRecorder();
+    final offCanvas = Canvas(recorder);
+
+    // Float-Uniforms setzen (Indices 0–37)
     int f = 0;
     // Audio (0–10)
     shader.setFloat(f++, time);
@@ -154,16 +205,36 @@ class _TunnelPainter extends CustomPainter {
     shader.setFloat(f++, dna.bassReact);
     shader.setFloat(f++, dna.midReact);
     shader.setFloat(f++, dna.phase);
-    // Palette — je 3 floats pro vec3 (21–32)
+    // Palette (21–32)
     _setColor(f, palette.shadow);    f += 3;
     _setColor(f, palette.low);       f += 3;
     _setColor(f, palette.high);      f += 3;
     _setColor(f, palette.highlight); f += 3;
+    // Feedback (33–37)
+    shader.setFloat(f++, feedback.zoom);
+    shader.setFloat(f++, feedback.rotation);
+    shader.setFloat(f++, feedback.decay);
+    shader.setFloat(f++, feedback.warpX);
+    shader.setFloat(f++, feedback.warpY);
 
-    canvas.drawRect(
+    // Sampler: vorheriges Frame als Feedback-Textur
+    shader.setImageSampler(0, prevFrame);
+
+    // In Offscreen-Canvas rendern
+    offCanvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
       Paint()..shader = shader,
     );
+
+    // Synchrones Frame-Capture — GPU rastert sofort
+    final picture  = recorder.endRecording();
+    final newFrame = picture.toImageSync(iw, ih);
+
+    // Auf echten Canvas ausgeben
+    canvas.drawImage(newFrame, Offset.zero, Paint());
+
+    // Neues Frame für nächsten Zyklus speichern
+    onNewFrame(newFrame);
   }
 
   @override
