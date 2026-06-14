@@ -3,10 +3,6 @@
 #include <algorithm>
 #include <numeric>
 
-// kissfft direkt includieren
-#define KISS_FFT_SCALAR float
-#include "kiss_fft.c"
-
 static constexpr float PI = 3.14159265358979323846f;
 
 FFTAnalyzer::FFTAnalyzer()
@@ -17,7 +13,6 @@ FFTAnalyzer::FFTAnalyzer()
         hanning_window_[i] = 0.5f * (1.0f - std::cos(2.0f * PI * i / (FFT_SIZE - 1)));
 
     build_log_bands();
-
     prev_env_left_.fill(0.0f);
     prev_env_right_.fill(0.0f);
 }
@@ -36,10 +31,9 @@ void FFTAnalyzer::build_log_bands()
     const float log_step = (log_max - log_min) / NUM_BANDS;
 
     for (size_t b = 0; b <= NUM_BANDS; b++) {
-        float freq      = std::pow(10.0f, log_min + b * log_step);
-        int   bin_index = static_cast<int>(freq * FFT_SIZE / sample_rate_);
-        bin_index       = std::clamp(bin_index, 0, static_cast<int>(FFT_SIZE / 2));
-        band_limits_[b] = bin_index;
+        float freq  = std::pow(10.0f, log_min + b * log_step);
+        int   bin   = static_cast<int>(freq * FFT_SIZE / sample_rate_);
+        band_limits_[b] = std::clamp(bin, 0, static_cast<int>(FFT_SIZE / 2));
     }
 }
 
@@ -52,36 +46,25 @@ void FFTAnalyzer::process(const float* left, const float* right,
     apply_envelope(out.env_left,  out.fft_left,  attack_ms_, release_ms_);
     apply_envelope(out.env_right, out.fft_right, attack_ms_, release_ms_);
 
-    float side_energy = 0.0f;
-    float mid_energy  = 0.0f;
+    float side_energy = 0.0f, mid_energy = 0.0f;
     for (size_t i = 0; i < NUM_BANDS; i++) {
         side_energy += out.fft_side[i];
         mid_energy  += out.fft_mid[i];
     }
     out.stereo_width = (mid_energy > 1e-6f)
-        ? std::min(1.0f, side_energy / mid_energy)
-        : 0.0f;
+        ? std::min(1.0f, side_energy / mid_energy) : 0.0f;
 
-    out.bass_left  = 0.0f; out.bass_right  = 0.0f;
-    out.mid_left   = 0.0f; out.mid_right   = 0.0f;
-    out.high_left  = 0.0f; out.high_right  = 0.0f;
+    out.bass_left = out.bass_right = 0.0f;
+    out.mid_left  = out.mid_right  = 0.0f;
+    out.high_left = out.high_right = 0.0f;
 
-    for (int i = 0; i < 8;  i++) {
-        out.bass_left  += out.env_left[i];
-        out.bass_right += out.env_right[i];
-    }
-    for (int i = 8; i < 20; i++) {
-        out.mid_left   += out.env_left[i];
-        out.mid_right  += out.env_right[i];
-    }
-    for (int i = 20; i < 32; i++) {
-        out.high_left  += out.env_left[i];
-        out.high_right += out.env_right[i];
-    }
+    for (int i = 0;  i < 8;  i++) { out.bass_left += out.env_left[i]; out.bass_right += out.env_right[i]; }
+    for (int i = 8;  i < 20; i++) { out.mid_left  += out.env_left[i]; out.mid_right  += out.env_right[i]; }
+    for (int i = 20; i < 32; i++) { out.high_left += out.env_left[i]; out.high_right += out.env_right[i]; }
 
-    out.bass_left  /= 8.0f;  out.bass_right  /= 8.0f;
-    out.mid_left   /= 12.0f; out.mid_right   /= 12.0f;
-    out.high_left  /= 12.0f; out.high_right  /= 12.0f;
+    out.bass_left /= 8.0f;  out.bass_right /= 8.0f;
+    out.mid_left  /= 12.0f; out.mid_right  /= 12.0f;
+    out.high_left /= 12.0f; out.high_right /= 12.0f;
 
     out.energy = 0.0f;
     for (size_t i = 0; i < NUM_BANDS; i++)
@@ -102,21 +85,17 @@ void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
     kiss_fft(cfg_, in_buf.data(), out_buf.data());
 
     for (size_t b = 0; b < NUM_BANDS; b++) {
-        int   bin_start = band_limits_[b];
-        int   bin_end   = band_limits_[b + 1];
-        float energy    = 0.0f;
-        int   count     = 0;
-
-        for (int bin = bin_start; bin < bin_end; bin++) {
-            float real = out_buf[bin].r;
-            float imag = out_buf[bin].i;
-            energy += std::sqrt(real * real + imag * imag);
+        int   start = band_limits_[b];
+        int   end   = band_limits_[b + 1];
+        float energy = 0.0f;
+        int   count  = 0;
+        for (int bin = start; bin < end; bin++) {
+            float r = out_buf[bin].r, im = out_buf[bin].i;
+            energy += std::sqrt(r * r + im * im);
             count++;
         }
-
         bands_out[b] = (count > 0)
-            ? std::min(1.0f, (energy / count) / (FFT_SIZE * 0.5f))
-            : 0.0f;
+            ? std::min(1.0f, (energy / count) / (FFT_SIZE * 0.5f)) : 0.0f;
     }
 }
 
@@ -131,14 +110,10 @@ void FFTAnalyzer::compute_mid_side(AudioData& data)
 void FFTAnalyzer::apply_envelope(float* envelope, const float* bands,
                                   float attack_ms, float release_ms)
 {
-    const float attack_coeff  = 1.0f - std::exp(-1.0f / (attack_ms  * 0.001f * sample_rate_));
-    const float release_coeff = 1.0f - std::exp(-1.0f / (release_ms * 0.001f * sample_rate_));
-
+    const float ac = 1.0f - std::exp(-1.0f / (attack_ms  * 0.001f * sample_rate_));
+    const float rc = 1.0f - std::exp(-1.0f / (release_ms * 0.001f * sample_rate_));
     for (size_t i = 0; i < NUM_BANDS; i++) {
         float prev = envelope[i];
-        if (bands[i] > prev)
-            envelope[i] = prev + attack_coeff  * (bands[i] - prev);
-        else
-            envelope[i] = prev + release_coeff * (bands[i] - prev);
+        envelope[i] = prev + (bands[i] > prev ? ac : rc) * (bands[i] - prev);
     }
 }

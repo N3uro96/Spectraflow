@@ -3,10 +3,7 @@
 #include <array>
 #include <vector>
 #include "../Types.h"
-
-// kissfft forward declaration
-typedef struct kiss_fft_state* kiss_fft_cfg;
-typedef struct { float r; float i; } kiss_fft_cpx;
+#include "kiss_fft.h"
 
 class FFTAnalyzer {
 public:
@@ -19,9 +16,9 @@ public:
     void process(const float* left, const float* right,
                  size_t num_samples, AudioData& out);
 
-    void set_attack(float ms)     { attack_ms_  = ms; }
-    void set_release(float ms)    { release_ms_ = ms; }
-    void set_sample_rate(float sr){ sample_rate_ = sr; build_log_bands(); }
+    void set_attack(float ms)      { attack_ms_   = ms; }
+    void set_release(float ms)     { release_ms_  = ms; }
+    void set_sample_rate(float sr) { sample_rate_ = sr; build_log_bands(); }
 
 private:
     void compute_fft(const float* samples, float* bands_out);
@@ -30,7 +27,7 @@ private:
                         float attack_ms, float release_ms);
     void build_log_bands();
 
-    kiss_fft_cfg cfg_;
+    kiss_fft_cfg                     cfg_;
     std::array<float, FFT_SIZE>      hanning_window_;
     std::array<int,   NUM_BANDS + 1> band_limits_;
 

@@ -6,9 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
-# ─────────────────────────────────────────
-# Oboe via FetchContent
-# ─────────────────────────────────────────
+# Oboe
 FetchContent_Declare(
     oboe
     GIT_REPOSITORY https://github.com/google/oboe.git
@@ -16,9 +14,7 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-# ─────────────────────────────────────────
-# kissfft via FetchContent
-# ─────────────────────────────────────────
+# kissfft
 FetchContent_Declare(
     kissfft
     GIT_REPOSITORY https://github.com/mborgerding/kissfft.git
@@ -26,15 +22,17 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-set(KISSFFT_STATIC ON CACHE BOOL "" FORCE)
+set(KISSFFT_STATIC ON  CACHE BOOL "" FORCE)
 set(KISSFFT_TEST   OFF CACHE BOOL "" FORCE)
 set(KISSFFT_TOOLS  OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(oboe kissfft)
 
-# ─────────────────────────────────────────
-# Core Sources
-# ─────────────────────────────────────────
+# kissfft als eigene statische Library aus Source
+add_library(kissfft_lib STATIC ${kissfft_SOURCE_DIR}/kiss_fft.c)
+target_include_directories(kissfft_lib PUBLIC ${kissfft_SOURCE_DIR})
+
+# Core
 set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../core)
 
 add_library(spectraflow_core SHARED
@@ -55,7 +53,7 @@ target_include_directories(spectraflow_core PRIVATE
 )
 
 target_link_libraries(spectraflow_core
-    kissfft
+    kissfft_lib
     oboe
     android
     log
