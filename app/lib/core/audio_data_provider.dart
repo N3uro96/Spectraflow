@@ -5,12 +5,10 @@ import 'package:flutter/material.dart';
 import 'native_bridge.dart';
 
 class AudioDataProvider extends ChangeNotifier {
-  List<double> fftLeft  = List.filled(32, 0.0);
-  List<double> fftRight = List.filled(32, 0.0);
-  List<double> fftMid   = List.filled(32, 0.0);
-  List<double> fftSide  = List.filled(32, 0.0);
   List<double> envLeft  = List.filled(32, 0.0);
   List<double> envRight = List.filled(32, 0.0);
+  List<double> fftMid   = List.filled(32, 0.0);
+  List<double> fftSide  = List.filled(32, 0.0);
 
   double bpm         = 120.0;
   double energy      = 0.0;
@@ -18,23 +16,20 @@ class AudioDataProvider extends ChangeNotifier {
   double beatPhase   = 0.0;
   double bassLeft    = 0.0;
   double bassRight   = 0.0;
-  double midLeft     = 0.0;
-  double highLeft    = 0.0;
 
-  // Texturen für Shader
+  // Texturen
   ui.Image? texLeft;
   ui.Image? texRight;
   ui.Image? texMid;
   ui.Image? texSide;
-  bool texturesReady = false;
+  bool      texturesReady = false;
 
-  Timer?  _pollTimer;
-  bool    _updating = false;
+  Timer? _pollTimer;
+  bool   _building = false;
 
   void start() {
-    // 30fps reicht für Shader-Updates
     _pollTimer = Timer.periodic(
-      const Duration(milliseconds: 33),
+      const Duration(milliseconds: 50), // 20fps für Texturen
       (_) => _poll(),
     );
   }
@@ -45,41 +40,56 @@ class AudioDataProvider extends ChangeNotifier {
   }
 
   Future<void> _poll() async {
-    if (_updating) return;
-    _updating = true;
+    if (_building) return;
+    _building = true;
 
     try {
       final data = await NativeBridge.getFFTData();
-      if (data.length < 192) {
-        _updating = false;
-        return;
-      }
+      if (data.length < 192) { _building = false; return; }
 
-      fftLeft  = data.sublist(0,   32);
-      fftRight = data.sublist(32,  64);
-      fftMid   = data.sublist(64,  96);
-      fftSide  = data.sublist(96,  128);
-      envLeft  = data.sublist(128, 160);
-      envRight = data.sublist(160, 192);
+      final newEnvLeft  = data.sublist(128, 160);
+      final newEnvRight = data.sublist(160, 192);
+      final newFftMid   = data.sublist(64,  96);
+      final newFftSide  = data.sublist(96,  128);
 
-      bassLeft    = (envLeft[0]  + envLeft[1]  + envLeft[2]  + envLeft[3])  / 4.0;
-      bassRight   = (envRight[0] + envRight[1] + envRight[2] + envRight[3]) / 4.0;
-      midLeft     = (envLeft[8]  + envLeft[9]  + envLeft[10] + envLeft[11]) / 4.0;
-      highLeft    = (envLeft[24] + envLeft[25] + envLeft[26] + envLeft[27]) / 4.0;
-      energy      = envLeft.fold(0.0, (a, b) => a + b) / 32.0;
+      // Aggregierte Werte
+      bassLeft  = (newEnvLeft[0]  + newEnvLeft[1]  + newEnvLeft[2]  + newEnvLeft[3])  / 4.0;
+      bassRight = (newEnvRight[0] + newEnvRight[1] + newEnvRight[2] + newEnvRight[3]) / 4.0;
+      energy    = newEnvLeft.fold(0.0, (a, b) => a + b) / 32.0;
 
-      double sideSum = fftSide.fold(0.0, (a, b) => a + b);
-      double midSum  = fftMid.fold(0.0,  (a, b) => a + b);
-      stereoWidth = midSum > 0.001 ? (sideSum / midSum).clamp(0.0, 1.0) : 0.0;
+      double sideSum = newFftSide.fold(0.0, (a, b) => a + b);
+      double midSum  = newFftMid.fold(0.0,  (a, b) => a + b);
+      stereoWidth    = midSum > 0.001 ? (sideSum / midSum).clamp(0.0, 1.0) : 0.0;
 
-      // Texturen bauen
-      await _buildTextures();
+      bpm = await NativeBridge.getBpm();
+
+      // Neue Texturen bauen
+      final nL = await _makeTexture(newEnvLeft);
+      final nR = await _makeTexture(newEnvRight);
+      final nM = await _makeTexture(newFftMid);
+      final nS = await _makeTexture(newFftSide);
+
+      // Erst alte disposen wenn neue fertig sind
+      texLeft?.dispose();
+      texRight?.dispose();
+      texMid?.dispose();
+      texSide?.dispose();
+
+      texLeft       = nL;
+      texRight      = nR;
+      texMid        = nM;
+      texSide       = nS;
+      envLeft       = newEnvLeft;
+      envRight      = newEnvRight;
+      fftMid        = newFftMid;
+      fftSide       = newFftSide;
+      texturesReady = true;
 
       notifyListeners();
     } catch (e) {
-      debugPrint('AudioDataProvider poll error: $e');
+      debugPrint('Poll error: $e');
     } finally {
-      _updating = false;
+      _building = false;
     }
   }
 
@@ -97,24 +107,6 @@ class AudioDataProvider extends ChangeNotifier {
         width: 32, height: 1, pixelFormat: ui.PixelFormat.rgba8888);
     final codec = await desc.instantiateCodec();
     return (await codec.getNextFrame()).image;
-  }
-
-  Future<void> _buildTextures() async {
-    final newL = await _makeTexture(envLeft);
-    final newR = await _makeTexture(envRight);
-    final newM = await _makeTexture(fftMid);
-    final newS = await _makeTexture(fftSide);
-
-    texLeft?.dispose();
-    texRight?.dispose();
-    texMid?.dispose();
-    texSide?.dispose();
-
-    texLeft  = newL;
-    texRight = newR;
-    texMid   = newM;
-    texSide  = newS;
-    texturesReady = true;
   }
 
   @override
