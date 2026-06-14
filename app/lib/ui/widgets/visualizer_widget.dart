@@ -91,7 +91,9 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     );
     final black = rec.endRecording().toImageSync(1, 1);
     final old   = _prevFrame;
-    _prevFrame  = black;
+    setState(() {
+      _prevFrame = black;
+    });
     old?.dispose();
   }
 

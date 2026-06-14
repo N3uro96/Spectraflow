@@ -60,16 +60,32 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = context.watch<PaletteManager>().accent;
-    final fps    = context.watch<FpsCounter>().fps;
+    final accent      = context.watch<PaletteManager>().accent;
+    final fps         = context.watch<FpsCounter>().fps;
+    final seeds       = context.watch<SeedManager>();
+    final shaderIdx   = seeds.currentShader % kShaderPaths.length;
+    final shaderName  = kShaderNames[shaderIdx];
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
         children: [
+          // App-Titel
           Text('SPECTRAFLOW',
             style: SFTheme.labelSmall.copyWith(
               letterSpacing: 3.0, color: SFTheme.textPrimary)),
+          const SizedBox(width: 12),
+          // Shader-Name — prominent als Chip
+          GlassContainer(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            borderRadius: SFTheme.radiusSm,
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text(shaderName,
+                style: SFTheme.titleMedium.copyWith(color: accent)),
+              const SizedBox(width: 5),
+              Text('SHADER', style: SFTheme.labelSmall),
+            ]),
+          ),
           const Spacer(),
           ListenableBuilder(
             listenable: audioData,
