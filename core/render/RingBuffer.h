@@ -1,41 +1,35 @@
 #pragma once
-#include <array>
-#include <cstddef>
 #include <mutex>
 
 template<typename T, size_t SIZE>
 class RingBuffer {
 public:
-    RingBuffer() : head_(0), tail_(0) {}
+    RingBuffer() : has_data_(false) {}
 
     bool push(const T& item) {
+        // Überschreibt gnadenlos den alten Frame mit dem neusten.
+        // So läuft der Buffer niemals voll.
         std::lock_guard<std::mutex> lock(mutex_);
-        size_t next = (head_ + 1) % SIZE;
-        if (next == tail_) return false; // Buffer voll
-        buffer_[head_] = item;
-        head_ = next;
+        latest_data_ = item;
+        has_data_ = true;
         return true;
     }
 
     bool pop(T& item) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (tail_ == head_) return false; // Buffer leer
-        item = buffer_[tail_];
-        tail_ = (tail_ + 1) % SIZE;
-        return true;
+        return peek_latest(item);
     }
 
     bool peek_latest(T& item) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (head_ == tail_) return false; // Buffer leer
-        size_t latest = (head_ == 0) ? SIZE - 1 : head_ - 1;
-        item = buffer_[latest];
+        if (!has_data_) return false;
+        
+        // Gibt immer den neusten Frame an das JNI/Flutter UI zurück
+        item = latest_data_;
         return true;
     }
 
 private:
-    std::array<T, SIZE> buffer_;
-    size_t head_;
-    size_t tail_;
+    T latest_data_{};
+    bool has_data_;
     std::mutex mutex_;
 };
