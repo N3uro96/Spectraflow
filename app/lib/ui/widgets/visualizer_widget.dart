@@ -11,9 +11,10 @@ import '../../core/palette_data.dart';
 const List<String> kShaderPaths = [
   'lib/shaders/smoke.frag',
   'lib/shaders/tunnel.frag',
+  'lib/shaders/plasma.frag',
 ];
 
-const List<String> kShaderNames = ['SMOKE', 'TUNNEL'];
+const List<String> kShaderNames = ['SMOKE', 'TUNNEL', 'PLASMA'];
 
 class VisualizerWidget extends StatefulWidget {
   final AudioDataProvider audioData;
