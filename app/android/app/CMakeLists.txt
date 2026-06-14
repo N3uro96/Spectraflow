@@ -37,6 +37,7 @@ add_library(spectraflow_core SHARED
     ${CORE_DIR}/audio/BPMDetector.cpp
     ${CORE_DIR}/audio/SignalNormalizer.cpp
     ${CORE_DIR}/render/DNASystem.cpp
+    ${CORE_DIR}/render/FeedbackRenderer.cpp
     ${CORE_DIR}/ai/AIBrain.cpp
     ${CORE_DIR}/spectraflow_ffi.cpp
     jni/SpectraflowJNI.cpp

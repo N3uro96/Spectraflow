@@ -88,3 +88,39 @@ uint64_t     sf_random_seed();
 #ifdef __cplusplus
 }
 #endif
+
+// ─────────────────────────────────────────
+// Feedback State FFI
+// ─────────────────────────────────────────
+typedef struct {
+    float zoom;
+    float rotation;
+    float warp_x;
+    float warp_y;
+    float dx;
+    float dy;
+    float decay;
+    float brightness;
+    float contrast;
+    float time;
+    float beat_phase;
+    float bass;
+    float mid;
+    float high;
+    float energy;
+} SF_FeedbackState;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Feedback State updaten und abholen
+void sf_update_feedback(float delta_time);
+bool sf_get_feedback_state(SF_FeedbackState* out);
+
+// Shader + Seed setzen
+void sf_set_shader(int shader_id, uint64_t seed);
+
+#ifdef __cplusplus
+}
+#endif
