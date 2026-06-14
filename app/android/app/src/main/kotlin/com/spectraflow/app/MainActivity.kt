@@ -17,7 +17,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // ── Method Channel (Steuerung) ──
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -32,7 +31,6 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        // ── Event Channel (Audio Daten Stream) ──
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(args: Any?, sink: EventChannel.EventSink?) {
@@ -50,13 +48,15 @@ class MainActivity : FlutterActivity() {
         streamJob?.cancel()
         streamJob = scope.launch {
             while (isActive) {
-                val data = SpectraflowEngine.nativeGetAllData()
+                // FloatArray direkt senden – NICHT .toList()!
+                // FloatArray → Float32List in Dart
+                val data: FloatArray? = SpectraflowEngine.nativeGetAllData()
                 if (data != null) {
                     withContext(Dispatchers.Main) {
-                        eventSink?.success(data.toList())
+                        eventSink?.success(data) // FloatArray direkt!
                     }
                 }
-                delay(33) // ~30fps
+                delay(33)
             }
         }
     }

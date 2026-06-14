@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../core/audio_data_provider.dart';
 
@@ -10,7 +9,6 @@ class ShaderCanvas extends StatelessWidget {
   Widget build(BuildContext context) {
     return RepaintBoundary(
       child: CustomPaint(
-        // repaint: audioData → nur Canvas neu zeichnen, kein Widget Rebuild
         painter: _DiagnosticPainter(audioData),
         size: Size.infinite,
       ),
@@ -20,9 +18,6 @@ class ShaderCanvas extends StatelessWidget {
 
 class _DiagnosticPainter extends CustomPainter {
   final AudioDataProvider data;
-
-  // repaint: data → Painter hört direkt auf ChangeNotifier
-  // Kein setState, kein Widget rebuild
   _DiagnosticPainter(this.data) : super(repaint: data);
 
   @override
@@ -30,15 +25,13 @@ class _DiagnosticPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, w, h),
-      Paint()..color = const Color(0xFF050505),
-    );
+    canvas.drawRect(Rect.fromLTWH(0, 0, w, h),
+        Paint()..color = const Color(0xFF050505));
 
     final barW  = w / 32.0;
     final halfH = h * 0.44;
 
-    // ── Linker Kanal (oben, grün→gelb) ──
+    // Linker Kanal (oben)
     final topY = h * 0.05;
     for (int i = 0; i < 32; i++) {
       final val = data.envLeft[i].clamp(0.0, 1.0);
@@ -53,7 +46,7 @@ class _DiagnosticPainter extends CustomPainter {
       );
     }
 
-    // ── Rechter Kanal (unten, blau→lila) ──
+    // Rechter Kanal (unten)
     final botY = h * 0.52;
     for (int i = 0; i < 32; i++) {
       final val = data.envRight[i].clamp(0.0, 1.0);
@@ -68,9 +61,9 @@ class _DiagnosticPainter extends CustomPainter {
       );
     }
 
-    // ── Stereo Meter (Mitte) ──
-    final mY  = h * 0.49;
-    final mH  = h * 0.02;
+    // Stereo Meter
+    final mY = h * 0.49;
+    final mH = h * 0.02;
     final cx  = w / 2.0;
     final sw  = data.stereoWidth.clamp(0.0, 1.0) * (w / 2.0);
 
@@ -81,13 +74,12 @@ class _DiagnosticPainter extends CustomPainter {
     canvas.drawLine(Offset(cx, mY), Offset(cx, mY + mH),
         Paint()..color = Colors.white54..strokeWidth = 1);
 
-    // ── Labels ──
     _text(canvas, 'L', Offset(4, topY), const Color(0xFF00FF44));
     _text(canvas, 'R', Offset(4, botY - 14), const Color(0xFF0088FF));
     _text(canvas, 'BPM ${data.bpm.toStringAsFixed(0)}',
         Offset(8, h - 16), Colors.white38);
     _text(canvas, 'E ${(data.energy * 100).toStringAsFixed(0)}%',
-        Offset(w - 56, h - 16), Colors.white38);
+        Offset(w - 60, h - 16), Colors.white38);
   }
 
   void _text(Canvas canvas, String t, Offset o, Color c) {
@@ -99,5 +91,7 @@ class _DiagnosticPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_DiagnosticPainter old) => false;
+  // shouldRepaint wird bei repaint: listenable nicht gebraucht
+  // aber true damit Widget-rebuilds auch neuzeichnen
+  bool shouldRepaint(_DiagnosticPainter old) => true;
 }
