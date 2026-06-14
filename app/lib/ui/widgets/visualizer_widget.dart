@@ -63,7 +63,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   Future<void> _loadShader() async {
     try {
       final program = await ui.FragmentProgram.fromAsset(
-          'lib/shaders/tunnel_composite.frag');
+          'lib/shaders/smoke.frag');
 
       // Schwarzes 1×1-Platzhalter-Frame damit sampler2D immer gesetzt ist
       final rec = ui.PictureRecorder();
