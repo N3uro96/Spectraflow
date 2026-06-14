@@ -1,25 +1,23 @@
 #include "FFTAnalyzer.h"
-#include "../kissfft/kiss_fft.c"
 #include <cmath>
 #include <algorithm>
+#include <numeric>
+
+// kissfft direkt includieren
+#define KISS_FFT_SCALAR float
+#include "kiss_fft.c"
 
 static constexpr float PI = 3.14159265358979323846f;
 
 FFTAnalyzer::FFTAnalyzer()
 {
-    // kissfft initialisieren
     cfg_ = kiss_fft_alloc(FFT_SIZE, 0, nullptr, nullptr);
 
-    // Hanning Fenster berechnen
-    // Reduziert Spectral Leakage an den Rändern des Buffers
-    for (size_t i = 0; i < FFT_SIZE; i++) {
+    for (size_t i = 0; i < FFT_SIZE; i++)
         hanning_window_[i] = 0.5f * (1.0f - std::cos(2.0f * PI * i / (FFT_SIZE - 1)));
-    }
 
-    // Logarithmische Band-Grenzen aufbauen
     build_log_bands();
 
-    // Envelopes auf 0 initialisieren
     prev_env_left_.fill(0.0f);
     prev_env_right_.fill(0.0f);
 }
@@ -31,8 +29,6 @@ FFTAnalyzer::~FFTAnalyzer()
 
 void FFTAnalyzer::build_log_bands()
 {
-    // Logarithmische Verteilung von 20Hz bis 20kHz
-    // Entspricht menschlicher Wahrnehmung
     const float f_min    = 20.0f;
     const float f_max    = 20000.0f;
     const float log_min  = std::log10(f_min);
@@ -50,18 +46,12 @@ void FFTAnalyzer::build_log_bands()
 void FFTAnalyzer::process(const float* left, const float* right,
                            size_t num_samples, AudioData& out)
 {
-    // Echte FFT pro Kanal
     compute_fft(left,  out.fft_left);
     compute_fft(right, out.fft_right);
-
-    // Mid/Side
     compute_mid_side(out);
-
-    // ADSR Envelopes
     apply_envelope(out.env_left,  out.fft_left,  attack_ms_, release_ms_);
     apply_envelope(out.env_right, out.fft_right, attack_ms_, release_ms_);
 
-    // Stereo Breite
     float side_energy = 0.0f;
     float mid_energy  = 0.0f;
     for (size_t i = 0; i < NUM_BANDS; i++) {
@@ -72,10 +62,6 @@ void FFTAnalyzer::process(const float* left, const float* right,
         ? std::min(1.0f, side_energy / mid_energy)
         : 0.0f;
 
-    // Energie-Bänder
-    // Bass:  Bänder 0-7   (~20Hz  - ~300Hz)
-    // Mid:   Bänder 8-19  (~300Hz - ~5kHz)
-    // High:  Bänder 20-31 (~5kHz  - ~20kHz)
     out.bass_left  = 0.0f; out.bass_right  = 0.0f;
     out.mid_left   = 0.0f; out.mid_right   = 0.0f;
     out.high_left  = 0.0f; out.high_right  = 0.0f;
@@ -93,12 +79,10 @@ void FFTAnalyzer::process(const float* left, const float* right,
         out.high_right += out.env_right[i];
     }
 
-    // Normalisieren
     out.bass_left  /= 8.0f;  out.bass_right  /= 8.0f;
     out.mid_left   /= 12.0f; out.mid_right   /= 12.0f;
     out.high_left  /= 12.0f; out.high_right  /= 12.0f;
 
-    // Gesamtenergie
     out.energy = 0.0f;
     for (size_t i = 0; i < NUM_BANDS; i++)
         out.energy += out.env_left[i] + out.env_right[i];
@@ -107,7 +91,6 @@ void FFTAnalyzer::process(const float* left, const float* right,
 
 void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
 {
-    // Input Buffer mit Hanning Fenster
     std::vector<kiss_fft_cpx> in_buf(FFT_SIZE);
     std::vector<kiss_fft_cpx> out_buf(FFT_SIZE);
 
@@ -116,10 +99,8 @@ void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
         in_buf[i].i = 0.0f;
     }
 
-    // FFT ausführen
     kiss_fft(cfg_, in_buf.data(), out_buf.data());
 
-    // Magnitude pro logarithmischem Band berechnen
     for (size_t b = 0; b < NUM_BANDS; b++) {
         int   bin_start = band_limits_[b];
         int   bin_end   = band_limits_[b + 1];
@@ -133,7 +114,6 @@ void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
             count++;
         }
 
-        // Normalisieren
         bands_out[b] = (count > 0)
             ? std::min(1.0f, (energy / count) / (FFT_SIZE * 0.5f))
             : 0.0f;
@@ -151,8 +131,6 @@ void FFTAnalyzer::compute_mid_side(AudioData& data)
 void FFTAnalyzer::apply_envelope(float* envelope, const float* bands,
                                   float attack_ms, float release_ms)
 {
-    // Attack:  schnell hochfahren  → sofortige Reaktion auf Kick/Snare
-    // Release: langsam abfallen   → fließender Spectraflow-Look
     const float attack_coeff  = 1.0f - std::exp(-1.0f / (attack_ms  * 0.001f * sample_rate_));
     const float release_coeff = 1.0f - std::exp(-1.0f / (release_ms * 0.001f * sample_rate_));
 
