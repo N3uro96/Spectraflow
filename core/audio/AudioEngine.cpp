@@ -18,7 +18,9 @@ void AudioEngine::feed(const float* left, const float* right, size_t num_samples
     AudioData data{};
 
     fft_->process(left, right, num_samples, data);
-    normalizer_->process(data);
+
+    // Normalizer DEAKTIVIERT - Auto-Gain im FFT Analyzer übernimmt
+    // normalizer_->process(data);
 
     float bpm = 120.0f; bool beat = false; float phase = 0.0f;
     bpm_->process(data, bpm, beat, phase);
@@ -38,7 +40,7 @@ bool AudioEngine::get_latest(AudioData& out) { return ring_buffer_.peek_latest(o
 void AudioEngine::set_sample_rate(float sr)
 {
     sample_rate_ = sr;
-    fft_->set_sample_rate(sr);   // Fix: FFT bekommt auch die echte Sample Rate
+    fft_->set_sample_rate(sr);
     bpm_->set_sample_rate(sr);
 }
 
