@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'native_bridge.dart';
 
 class AudioDataProvider extends ChangeNotifier {
-  // Pre-allocated – werden NIE neu erstellt
   final Float64List envLeft  = Float64List(32);
   final Float64List envRight = Float64List(32);
   final Float64List fftMid   = Float64List(32);
@@ -18,20 +17,19 @@ class AudioDataProvider extends ChangeNotifier {
   double midLeft     = 0.0;
   double highLeft    = 0.0;
 
-  StreamSubscription<Float32List>? _sub;
+  StreamSubscription<Float64List>? _sub;
 
   void start() {
-    _sub = NativeBridge.audioStream.listen(_onData,
-        onError: (e) => debugPrint('Stream error: $e'));
+    _sub = NativeBridge.audioStream.listen(
+      _onData,
+      onError: (e) => debugPrint('Stream error: $e'),
+      cancelOnError: false, // Stream nicht abbrechen bei Fehler
+    );
   }
 
-  void stop() {
-    _sub?.cancel();
-    _sub = null;
-  }
+  void stop() { _sub?.cancel(); _sub = null; }
 
-  // Kein new List() – direkt in pre-allocated arrays kopieren
-  void _onData(Float32List raw) {
+  void _onData(Float64List raw) {
     if (raw.length < 195) return;
 
     for (int i = 0; i < 32; i++) {
@@ -59,8 +57,5 @@ class AudioDataProvider extends ChangeNotifier {
   }
 
   @override
-  void dispose() {
-    stop();
-    super.dispose();
-  }
+  void dispose() { stop(); super.dispose(); }
 }

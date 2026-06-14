@@ -6,10 +6,10 @@ import 'native_bridge.dart';
 enum AudioSource { none, microphone, file }
 
 class AudioManager extends ChangeNotifier {
-  AudioSource _source    = AudioSource.none;
+  AudioSource _source      = AudioSource.none;
   String?     _filePath;
   String?     _fileName;
-  bool        _isPlaying = false;
+  bool        _isPlaying   = false;
   bool        _initialized = false;
 
   AudioSource get source    => _source;
@@ -18,24 +18,19 @@ class AudioManager extends ChangeNotifier {
   bool        get isPlaying => _isPlaying;
 
   Future<void> _ensureInit() async {
-    if (!_initialized) {
-      _initialized = await NativeBridge.init();
-    }
+    if (!_initialized) _initialized = await NativeBridge.init();
   }
 
   Future<bool> startMicrophone() async {
     final status = await Permission.microphone.request();
     if (!status.isGranted) return false;
-
     await _ensureInit();
     await NativeBridge.stop();
-
     final ok = await NativeBridge.startMicrophone();
     if (!ok) return false;
-
     _source    = AudioSource.microphone;
     _isPlaying = true;
-    _filePath  = null;
+    _filePath  = null; // Fix: State sauber halten
     _fileName  = null;
     notifyListeners();
     return true;
@@ -47,18 +42,13 @@ class AudioManager extends ChangeNotifier {
       allowedExtensions: ['mp3', 'wav', 'flac', 'aac', 'm4a'],
       allowMultiple: false,
     );
-
     if (result == null || result.files.isEmpty) return false;
-
     final file = result.files.first;
     if (file.path == null) return false;
-
     await _ensureInit();
     await NativeBridge.stop();
-
     final ok = await NativeBridge.startFilePlayback(file.path!);
     if (!ok) return false;
-
     _filePath  = file.path;
     _fileName  = file.name;
     _source    = AudioSource.file;

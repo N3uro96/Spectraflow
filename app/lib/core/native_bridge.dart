@@ -5,9 +5,13 @@ class NativeBridge {
   static const _method = MethodChannel('com.spectraflow.app/engine');
   static const _event  = EventChannel('com.spectraflow.app/audio_data');
 
-  // Float32List direkt – kein Boxing, kein GC
-  static Stream<Float32List> get audioStream =>
-      _event.receiveBroadcastStream().map((data) => data as Float32List);
+  // Kotlin FloatArray → Dart Float64List (NICHT Float32List!)
+  static Stream<Float64List> get audioStream =>
+      _event.receiveBroadcastStream().map((data) {
+        if (data is Float64List) return data;
+        // Fallback für alle anderen Typen
+        return Float64List.fromList((data as List<dynamic>).cast<double>());
+      });
 
   static Future<bool> init() async {
     try { return await _method.invokeMethod('init') ?? false; }
