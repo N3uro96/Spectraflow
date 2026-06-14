@@ -9,14 +9,11 @@ uniform float u_high;
 uniform float u_energy;
 uniform float u_bpm;
 uniform float u_stereo;
-
-uniform sampler2D u_feedback;
+uniform float u_bass_left;
+uniform float u_bass_right;
 
 out vec4 fragColor;
 
-// ─────────────────────────────────────────
-// Hilfsfunktionen
-// ─────────────────────────────────────────
 vec3 hsv2rgb(vec3 c) {
     vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
     vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
@@ -28,11 +25,10 @@ mat2 rot(float a) {
     return mat2(c, -s, s, c);
 }
 
-// Tunnel Palette
-vec3 tunnelColor(float t, float time) {
+vec3 tunnelColor(float t, float time, float energy) {
     float hue = fract(t * 0.3 + time * 0.05);
-    float sat = 0.7 + u_energy * 0.3;
-    float val = 0.6 + u_bass * 0.4;
+    float sat  = 0.7 + energy * 0.3;
+    float val  = 0.5 + energy * 0.5;
     return hsv2rgb(vec3(hue, sat, val));
 }
 
@@ -42,97 +38,100 @@ void main() {
     vec2 center    = uv - 0.5;
     center.x      *= u_width / u_height;
 
-    // ── Feedback Warp ──
+    // ── Beat Phase aus BPM berechnen ──
+    float beat_duration = 60.0 / max(u_bpm, 60.0);
+    float beat_phase    = fract(u_time / beat_duration);
+    float beat_pulse    = smoothstep(1.0, 0.0, beat_phase * 4.0);
+
+    // ── Stereo Differenz ──
+    float stereo_diff = u_bass_left - u_bass_right;
+
+    // ── Warp ──
     vec2 warped = center;
 
-    // Zoom – Bass treibt den Sog
-    float zoom = 1.015 + u_bass * 0.02;
+    // Zoom: Bass + Beat Puls
+    float zoom = 1.015
+        + u_bass   * 0.025
+        + beat_pulse * 0.015;
     warped *= zoom;
 
-    // Rotation – Mid dreht langsam
-    float angle = u_time * 0.08 + u_mid * 0.15;
+    // Rotation: Mid + Stereo Differenz dreht den Tunnel
+    float angle = u_time * 0.08
+        + u_mid * 0.15
+        + stereo_diff * 0.2;
     warped = rot(angle) * warped;
 
-    // Warp – High erzeugt Verwirbelung
+    // Warp: High + Beat
+    float warp_strength = 0.015 * (1.0 + u_high * 2.0 + beat_pulse * 0.5);
     warped += vec2(
-        sin(warped.y * 4.0 + u_time * 0.5) * 0.015 * (1.0 + u_high),
-        cos(warped.x * 4.0 + u_time * 0.5) * 0.015 * (1.0 + u_high)
+        sin(warped.y * 4.0 + u_time * 0.7) * warp_strength,
+        cos(warped.x * 4.0 + u_time * 0.5) * warp_strength
     );
-
-    // Vorherigen Frame sampeln + Decay
-    vec2 feedbackUV = warped / (u_width / u_height) + 0.5;
-    feedbackUV      = clamp(feedbackUV, 0.0, 1.0);
-    vec4 prev       = texture(u_feedback, feedbackUV);
-
-    // Decay – Energy bestimmt wie schnell Bild erneuert wird
-    float decay = 0.96 - u_energy * 0.015;
-    prev.rgb   *= decay;
 
     // ── Tunnel Geometrie ──
     vec2  p = center;
     float r = length(p);
     float a = atan(p.y, p.x);
 
-    // Tunnel Tiefe
-    float speed  = 0.4 + u_bass * 0.3;
-    float tunnel = fract(0.8 / (r + 0.1) - u_time * speed);
+    // Tunnel Tiefe: Bass beschleunigt
+    float speed  = 0.35 + u_bass * 0.4 + beat_pulse * 0.15;
+    float tunnel = fract(0.8 / (r + 0.05) - u_time * speed);
 
-    // Speichen (6 Stück, DNA würde das steuern)
-    float spokes  = 6.0;
-    float spoke   = smoothstep(0.92, 0.98,
-                    abs(sin(a * spokes * 0.5)));
+    // Speichen
+    float spokes = 6.0;
+    float spoke  = smoothstep(0.90, 0.97,
+                   abs(sin(a * spokes * 0.5)));
 
-    // Stereo: L/R leicht versetzt
-    float stereo_offset = u_stereo * 0.05;
-    float tunnel_l = fract(0.8 / (length(p + vec2(stereo_offset, 0.0)) + 0.1)
-                    - u_time * speed);
-    float tunnel_r = fract(0.8 / (length(p - vec2(stereo_offset, 0.0)) + 0.1)
-                    - u_time * speed);
+    // ── Echtes Stereo ──
+    // Linker Kanal → linke Seite reagiert stärker
+    float stereo_offset = u_stereo * 0.04;
+    vec2  p_left  = p + vec2( stereo_offset * u_bass_left,  0.0);
+    vec2  p_right = p + vec2(-stereo_offset * u_bass_right, 0.0);
+
+    float tunnel_l = fract(0.8 / (length(p_left)  + 0.05) - u_time * speed);
+    float tunnel_r = fract(0.8 / (length(p_right) + 0.05) - u_time * speed);
 
     // ── Farben ──
-    vec3 col_center = tunnelColor(tunnel, u_time);
-    vec3 col_l      = tunnelColor(tunnel_l + 0.1, u_time);
-    vec3 col_r      = tunnelColor(tunnel_r + 0.2, u_time);
+    vec3 col_c = tunnelColor(tunnel,   u_time, u_energy);
+    vec3 col_l = tunnelColor(tunnel_l, u_time + 0.1, u_energy);
+    vec3 col_r = tunnelColor(tunnel_r, u_time + 0.2, u_energy);
 
-    // Stereo Mischung
-    vec3 col = mix(col_center,
-                   mix(col_l, col_r, 0.5),
-                   u_stereo * 0.3);
+    // Stereo Mischung: L/R getrennt nach links/rechts
+    float lr_mix = uv.x; // 0 = ganz links, 1 = ganz rechts
+    vec3  col    = mix(
+        mix(col_c, col_l, u_stereo * 0.4 * (1.0 - lr_mix)),
+        mix(col_c, col_r, u_stereo * 0.4 * lr_mix),
+        u_stereo * 0.3
+    );
 
-    // Speichen dunkler
-    col *= mix(1.0, 0.2, spoke);
-
-    // Zentrum-Glow (Beat reagiert)
-    float glow  = exp(-r * (4.0 - u_energy * 2.0));
-    glow       *= 1.0 + u_bass * 0.5;
-    col        += tunnelColor(u_time * 0.1, u_time) * glow * 0.6;
+    // Speichen
+    col *= mix(1.0, 0.15, spoke);
 
     // Tunnel Helligkeit
-    float brightness = 0.4 + tunnel * 0.6;
-    col             *= brightness;
+    col *= 0.3 + tunnel * 0.7;
 
-    // ── Feedback Mischen ──
-    // Neue Geometrie über alten Frame legen
-    col = mix(prev.rgb, col, 0.2 + u_energy * 0.1);
+    // ── Glow vom Zentrum ──
+    float glow = exp(-r * (3.5 - u_energy * 1.5));
+    glow      *= 1.0 + u_bass * 0.8 + beat_pulse * 0.5;
+    col       += tunnelColor(u_time * 0.08, u_time, u_energy) * glow * 0.7;
 
-    // ── Post Processing ──
-    // Vignette
-    float vig = 1.0 - dot(center * 1.2, center * 1.2);
-    vig        = clamp(vig, 0.0, 1.0);
-    col       *= vig;
+    // ── Beat Flash ──
+    col += beat_pulse * 0.08 * tunnelColor(u_time * 0.2, u_time, 1.0);
 
-    // Chromatic Aberration auf Beat
-    // (verschiebt RGB Kanäle leicht)
-    float ca  = u_bass * 0.008;
-    if (ca > 0.001) {
-        vec2 ca_uv_r = feedbackUV + vec2(ca,  0.0);
-        vec2 ca_uv_b = feedbackUV - vec2(ca,  0.0);
-        col.r = mix(col.r, texture(u_feedback, ca_uv_r).r, 0.3);
-        col.b = mix(col.b, texture(u_feedback, ca_uv_b).b, 0.3);
-    }
+    // ── Vignette ──
+    float vig = 1.0 - dot(center * 1.3, center * 1.3);
+    col      *= clamp(vig, 0.0, 1.0);
 
-    // Beat Flash
-    col += u_bass * 0.06 * tunnelColor(u_time * 0.2, u_time);
+    // ── Chromatische Aberration auf Bass ──
+    float ca     = u_bass * 0.006 + beat_pulse * 0.004;
+    vec2  p_ca_r = center + vec2(ca, 0.0);
+    vec2  p_ca_b = center - vec2(ca, 0.0);
+    float r_ca_r = length(p_ca_r);
+    float r_ca_b = length(p_ca_b);
+    float t_ca_r = fract(0.8 / (r_ca_r + 0.05) - u_time * speed);
+    float t_ca_b = fract(0.8 / (r_ca_b + 0.05) - u_time * speed);
+    col.r = mix(col.r, tunnelColor(t_ca_r, u_time, u_energy).r, 0.3);
+    col.b = mix(col.b, tunnelColor(t_ca_b, u_time, u_energy).b, 0.3);
 
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
