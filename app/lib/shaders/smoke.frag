@@ -171,8 +171,9 @@ void main() {
     new_content += beat_kick * 0.1 * u_pal_highlight;
 
     // ── Vignette ──────────────────────────────────────────
-    float vig    = 1.0 - dot(uv0 * 1.3, uv0 * 1.3);
-    new_content *= clamp(vig, 0.0, 1.0);
+    vec2  vig_uv  = uv_raw * 2.0 - 1.0;
+    float vig     = 1.0 - smoothstep(0.5, 1.5, dot(vig_uv, vig_uv));
+    new_content  *= vig;
 
     // ── Milkdrop Composite: Feedback + neuer Inhalt ────────
     vec3 col = feedback + new_content;

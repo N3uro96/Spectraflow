@@ -210,8 +210,9 @@ void main() {
   col += u_pal_low * exp(-length(uv_centered - vec2(s_off * u_bass_right, 0.0)) * 5.0) * u_bass_right * u_stereo * 0.12;
 
   // Vignette
-  float vig = 1.0 - dot(uv_centered * 1.2, uv_centered * 1.2);
-  col *= clamp(vig, 0.0, 1.0);
+  vec2  vig_uv = uv_raw * 2.0 - 1.0;
+  float vig    = 1.0 - smoothstep(0.5, 1.5, dot(vig_uv, vig_uv));
+  col         *= vig;
 
   // ── Feedback ────────────────────────────────────────────
   vec2 fb = uv_raw - 0.5;

@@ -176,8 +176,9 @@ void main() {
     col *= 1.0 + u_energy * 0.45;
 
     // ── Vignette ───────────────────────────────────────────
-    float vig = 1.0 - dot(uv0 * 1.1, uv0 * 1.1);
-    col *= clamp(vig, 0.0, 1.0);
+    vec2  vig_uv = uv_raw * 2.0 - 1.0;
+    float vig    = 1.0 - smoothstep(0.5, 1.5, dot(vig_uv, vig_uv));
+    col         *= vig;
 
     // ── Feedback Composite ─────────────────────────────────
     col = feedback + col;
