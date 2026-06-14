@@ -3,6 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../../core/audio_manager.dart';
 import '../../core/audio_data_provider.dart';
+import '../../core/fps_counter.dart';
 import '../../core/seed_manager.dart';
 import '../../core/palette_manager.dart';
 import '../../core/dna_generator.dart';
@@ -59,6 +60,7 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = context.watch<PaletteManager>().accent;
+    final fps    = context.watch<FpsCounter>().fps;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -90,6 +92,17 @@ class _TopBar extends StatelessWidget {
                       style: SFTheme.titleMedium.copyWith(color: accent)),
                   const SizedBox(width: 4),
                   Text('STEREO', style: SFTheme.labelSmall),
+                ]),
+              ),
+              const SizedBox(width: 10),
+              GlassContainer(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                borderRadius: SFTheme.radiusSm,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('${fps.toStringAsFixed(0)}',
+                      style: SFTheme.titleMedium.copyWith(color: accent)),
+                  const SizedBox(width: 4),
+                  Text('FPS', style: SFTheme.labelSmall),
                 ]),
               ),
             ]),

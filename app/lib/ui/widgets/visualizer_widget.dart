@@ -1,9 +1,11 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:provider/provider.dart';
 import '../../core/audio_data_provider.dart';
 import '../../core/dna_generator.dart';
 import '../../core/feedback_state.dart';
+import '../../core/fps_counter.dart';
 import '../../core/palette_data.dart';
 
 class VisualizerWidget extends StatefulWidget {
@@ -36,12 +38,19 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   double              _time   = 0.0;
   double              _lastMs = 0.0;
   ui.Image?           _prevFrame;
-  final FeedbackState _feedback = FeedbackState();
+  final FeedbackState _feedback   = FeedbackState();
+  FpsCounter?         _fpsCounter;
 
   @override
   void initState() {
     super.initState();
     _loadShader();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _fpsCounter = Provider.of<FpsCounter>(context, listen: false);
   }
 
   @override
@@ -84,6 +93,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     _lastMs  = ms;
     _time    = ms / 1000.0;
     _feedback.update(widget.dna, widget.audioData, dt, _time);
+    _fpsCounter?.tick(_time);
     setState(() {});
   }
 
