@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../../core/audio_manager.dart';
+import '../../core/audio_data_provider.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/shader_canvas.dart';
@@ -14,10 +15,8 @@ class VisualizerScreen extends StatefulWidget {
 }
 
 class _VisualizerScreenState extends State<VisualizerScreen> {
-  double _bpm         = 128.0;
-  double _stereo      = 0.85;
-  int    _shaderIndex  = 0;
-  int    _paletteIndex = 0;
+  int _shaderIndex  = 0;
+  int _paletteIndex = 0;
 
   final List<String> _shaderNames = [
     'NEBULA', 'VORTEX', 'FRACTAL', 'PLASMA',
@@ -35,53 +34,48 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AudioManager(),
-      child: Scaffold(
-        backgroundColor: SFTheme.background,
-        body: Consumer<AudioManager>(
-          builder: (context, audio, _) {
-            return Stack(
+    final audio     = context.watch<AudioManager>();
+    final audioData = context.watch<AudioDataProvider>();
+
+    return Scaffold(
+      backgroundColor: SFTheme.background,
+      body: Stack(
+        children: [
+          // ── Shader mit echten Audio Daten ──
+          Positioned.fill(
+            child: ShaderCanvas(audioData: audioData),
+          ),
+
+          // ── UI Overlay ──
+          SafeArea(
+            child: Column(
               children: [
-                const Positioned.fill(child: ShaderCanvas()),
-                SafeArea(
-                  child: Column(
-                    children: [
-                      _buildTopBar(audio),
-                      const Spacer(),
-                      if (audio.fileName != null)
-                        _buildNowPlaying(audio),
-                      _buildBottomPanel(audio),
-                    ],
-                  ),
-                ),
+                _buildTopBar(audioData),
+                const Spacer(),
+                if (audio.fileName != null) _buildNowPlaying(audio),
+                _buildBottomPanel(audio),
               ],
-            );
-          },
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // ─────────────────────────────────────────
-  // Top Bar
-  // ─────────────────────────────────────────
-  Widget _buildTopBar(AudioManager audio) {
+  Widget _buildTopBar(AudioDataProvider data) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
         children: [
           Text('SPECTRAFLOW',
             style: SFTheme.labelSmall.copyWith(
-              letterSpacing: 3.0, color: SFTheme.textPrimary,
-            ),
-          ),
+              letterSpacing: 3.0, color: SFTheme.textPrimary)),
           const Spacer(),
           GlassContainer(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             borderRadius: SFTheme.radiusSm,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('${_bpm.toStringAsFixed(0)}', style: SFTheme.titleMedium),
+              Text('${data.bpm.toStringAsFixed(0)}', style: SFTheme.titleMedium),
               const SizedBox(width: 4),
               Text('BPM', style: SFTheme.labelSmall),
             ]),
@@ -91,7 +85,7 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             borderRadius: SFTheme.radiusSm,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('${(_stereo * 100).toStringAsFixed(0)}%',
+              Text('${(data.stereoWidth * 100).toStringAsFixed(0)}%',
                   style: SFTheme.titleMedium),
               const SizedBox(width: 4),
               Text('STEREO', style: SFTheme.labelSmall),
@@ -102,9 +96,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     ).animate().fadeIn(duration: 600.ms);
   }
 
-  // ─────────────────────────────────────────
-  // Now Playing Banner
-  // ─────────────────────────────────────────
   Widget _buildNowPlaying(AudioManager audio) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -115,27 +106,22 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
           children: [
             Icon(
               audio.source == AudioSource.microphone
-                  ? Icons.mic_rounded
-                  : Icons.music_note_rounded,
-              color: SFTheme.textPrimary,
-              size: 16,
+                  ? Icons.mic_rounded : Icons.music_note_rounded,
+              color: SFTheme.textPrimary, size: 16,
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 audio.source == AudioSource.microphone
-                    ? 'MICROPHONE INPUT'
-                    : audio.fileName ?? '',
-                style: SFTheme.bodyMedium.copyWith(
-                  color: SFTheme.textPrimary,
-                ),
+                    ? 'MICROPHONE INPUT' : audio.fileName ?? '',
+                style: SFTheme.bodyMedium.copyWith(color: SFTheme.textPrimary),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             GestureDetector(
               onTap: audio.stop,
               child: Icon(Icons.close_rounded,
-                color: SFTheme.textSecondary, size: 16),
+                  color: SFTheme.textSecondary, size: 16),
             ),
           ],
         ),
@@ -143,9 +129,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     ).animate().fadeIn(duration: 300.ms);
   }
 
-  // ─────────────────────────────────────────
-  // Bottom Panel
-  // ─────────────────────────────────────────
   Widget _buildBottomPanel(AudioManager audio) {
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -168,9 +151,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       .fadeIn(duration: 600.ms);
   }
 
-  // ─────────────────────────────────────────
-  // Shader Selector
-  // ─────────────────────────────────────────
   Widget _buildShaderSelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -212,9 +192,6 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     );
   }
 
-  // ─────────────────────────────────────────
-  // Palette Selector
-  // ─────────────────────────────────────────
   Widget _buildPaletteSelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -255,35 +232,26 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     );
   }
 
-  // ─────────────────────────────────────────
-  // Playback Controls
-  // ─────────────────────────────────────────
   Widget _buildPlaybackControls(AudioManager audio) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        // Mikrofon Button
         _buildControlButton(
           icon: audio.source == AudioSource.microphone
-              ? Icons.mic_rounded
-              : Icons.mic_none_rounded,
+              ? Icons.mic_rounded : Icons.mic_none_rounded,
           label: 'MIC',
           active: audio.source == AudioSource.microphone,
           onTap: () async {
             if (audio.source == AudioSource.microphone) {
-              audio.stop();
+              await audio.stop();
             } else {
               await audio.startMicrophone();
             }
           },
         ),
         const SizedBox(width: 16),
-
-        // Play / Stop Button
         GestureDetector(
-          onTap: audio.source == AudioSource.none
-              ? null
-              : audio.togglePlay,
+          onTap: audio.source == AudioSource.none ? null : audio.togglePlay,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             width: 64, height: 64,
@@ -293,26 +261,19 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
               border: Border.all(color: SFTheme.glassBorder, width: 0.5),
             ),
             child: Icon(
-              audio.isPlaying
-                  ? Icons.stop_rounded
-                  : Icons.play_arrow_rounded,
+              audio.isPlaying ? Icons.stop_rounded : Icons.play_arrow_rounded,
               color: audio.source == AudioSource.none
-                  ? SFTheme.textHint
-                  : SFTheme.textPrimary,
+                  ? SFTheme.textHint : SFTheme.textPrimary,
               size: 32,
             ),
           ),
         ),
         const SizedBox(width: 16),
-
-        // Ordner Button
         _buildControlButton(
           icon: Icons.folder_open_rounded,
           label: 'FILE',
           active: audio.source == AudioSource.file,
-          onTap: () async {
-            await audio.pickAudioFile();
-          },
+          onTap: () async => await audio.pickAudioFile(),
         ),
       ],
     );

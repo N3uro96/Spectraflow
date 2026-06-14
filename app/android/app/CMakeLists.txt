@@ -6,7 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
-# Oboe
 FetchContent_Declare(
     oboe
     GIT_REPOSITORY https://github.com/google/oboe.git
@@ -14,7 +13,6 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-# kissfft
 FetchContent_Declare(
     kissfft
     GIT_REPOSITORY https://github.com/mborgerding/kissfft.git
@@ -28,11 +26,9 @@ set(KISSFFT_TOOLS  OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(oboe kissfft)
 
-# kissfft als eigene statische Library aus Source
 add_library(kissfft_lib STATIC ${kissfft_SOURCE_DIR}/kiss_fft.c)
 target_include_directories(kissfft_lib PUBLIC ${kissfft_SOURCE_DIR})
 
-# Core
 set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../core)
 
 add_library(spectraflow_core SHARED
@@ -40,6 +36,7 @@ add_library(spectraflow_core SHARED
     ${CORE_DIR}/audio/FFTAnalyzer.cpp
     ${CORE_DIR}/audio/BPMDetector.cpp
     ${CORE_DIR}/audio/SignalNormalizer.cpp
+    ${CORE_DIR}/audio/FilePlayer.cpp
     ${CORE_DIR}/render/DNASystem.cpp
     ${CORE_DIR}/ai/AIBrain.cpp
     ${CORE_DIR}/spectraflow_ffi.cpp
@@ -48,6 +45,7 @@ add_library(spectraflow_core SHARED
 
 target_include_directories(spectraflow_core PRIVATE
     ${CORE_DIR}
+    ${CORE_DIR}/deps
     ${oboe_SOURCE_DIR}/include
     ${kissfft_SOURCE_DIR}
 )

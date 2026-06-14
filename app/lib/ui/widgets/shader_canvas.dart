@@ -2,9 +2,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import '../../core/audio_data_provider.dart';
 
 class ShaderCanvas extends StatefulWidget {
-  const ShaderCanvas({super.key});
+  final AudioDataProvider audioData;
+
+  const ShaderCanvas({super.key, required this.audioData});
 
   @override
   State<ShaderCanvas> createState() => _ShaderCanvasState();
@@ -18,11 +21,6 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   bool               _loaded = false;
   String?            _error;
 
-  final List<double> _fftLeft  = List.generate(32, (i) =>
-      0.3 + 0.5 * (i % 8) / 8.0);
-  final List<double> _fftRight = List.generate(32, (i) =>
-      0.35 + 0.45 * ((i + 4) % 8) / 8.0);
-
   ui.Image? _texLeft;
   ui.Image? _texRight;
   ui.Image? _texMid;
@@ -32,9 +30,26 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   void initState() {
     super.initState();
     _loadShader();
+    widget.audioData.addListener(_onAudioUpdate);
   }
 
-  Future<ui.Image> _buildFFTTexture(List<double> bands) async {
+  @override
+  void dispose() {
+    widget.audioData.removeListener(_onAudioUpdate);
+    _ticker?.dispose();
+    _texLeft?.dispose();
+    _texRight?.dispose();
+    _texMid?.dispose();
+    _texSide?.dispose();
+    super.dispose();
+  }
+
+  void _onAudioUpdate() {
+    if (!mounted) return;
+    _updateTextures();
+  }
+
+  Future<ui.Image> _buildTexture(List<double> bands) async {
     final pixels = Uint8List(32 * 4);
     for (int i = 0; i < 32; i++) {
       final val = (bands[i].clamp(0.0, 1.0) * 255).toInt();
@@ -45,11 +60,36 @@ class _ShaderCanvasState extends State<ShaderCanvas>
     }
     final codec = await ui.ImageDescriptor.raw(
       await ui.ImmutableBuffer.fromUint8List(pixels),
-      width: 32,
-      height: 1,
+      width: 32, height: 1,
       pixelFormat: ui.PixelFormat.rgba8888,
     ).instantiateCodec();
     return (await codec.getNextFrame()).image;
+  }
+
+  Future<void> _updateTextures() async {
+    final audio = widget.audioData;
+    final newLeft  = await _buildTexture(audio.envLeft);
+    final newRight = await _buildTexture(audio.envRight);
+    final newMid   = await _buildTexture(audio.fftMid);
+    final newSide  = await _buildTexture(audio.fftSide);
+
+    if (!mounted) {
+      newLeft.dispose(); newRight.dispose();
+      newMid.dispose();  newSide.dispose();
+      return;
+    }
+
+    _texLeft?.dispose();
+    _texRight?.dispose();
+    _texMid?.dispose();
+    _texSide?.dispose();
+
+    setState(() {
+      _texLeft  = newLeft;
+      _texRight = newRight;
+      _texMid   = newMid;
+      _texSide  = newSide;
+    });
   }
 
   Future<void> _loadShader() async {
@@ -58,15 +98,11 @@ class _ShaderCanvasState extends State<ShaderCanvas>
         'lib/shaders/test_shader.frag',
       );
 
-      final mid  = List.generate(32, (i) =>
-          (_fftLeft[i] + _fftRight[i]) * 0.5);
-      final side = List.generate(32, (i) =>
-          (_fftLeft[i] - _fftRight[i]).abs() * 0.5);
-
-      _texLeft  = await _buildFFTTexture(_fftLeft);
-      _texRight = await _buildFFTTexture(_fftRight);
-      _texMid   = await _buildFFTTexture(mid);
-      _texSide  = await _buildFFTTexture(side);
+      // Initial Texturen mit Nullen
+      _texLeft  = await _buildTexture(List.filled(32, 0.0));
+      _texRight = await _buildTexture(List.filled(32, 0.0));
+      _texMid   = await _buildTexture(List.filled(32, 0.0));
+      _texSide  = await _buildTexture(List.filled(32, 0.0));
 
       setState(() {
         _shader = program.fragmentShader();
@@ -84,35 +120,33 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   }
 
   @override
-  void dispose() {
-    _ticker?.dispose();
-    _texLeft?.dispose();
-    _texRight?.dispose();
-    _texMid?.dispose();
-    _texSide?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     if (_error != null) {
       return Center(
         child: Text('Shader Error: $_error',
-          style: const TextStyle(color: Colors.red, fontSize: 12)),
+          style: const TextStyle(color: Colors.red, fontSize: 10)),
       );
     }
-    if (!_loaded || _shader == null ||
-        _texLeft == null || _texRight == null) {
+    if (!_loaded || _shader == null || _texLeft == null) {
       return const SizedBox.expand();
     }
+
+    final audio = widget.audioData;
+
     return CustomPaint(
       painter: _ShaderPainter(
-        shader:   _shader!,
-        time:     _time,
-        texLeft:  _texLeft!,
-        texRight: _texRight!,
-        texMid:   _texMid!,
-        texSide:  _texSide!,
+        shader:     _shader!,
+        time:       _time,
+        texLeft:    _texLeft!,
+        texRight:   _texRight!,
+        texMid:     _texMid!,
+        texSide:    _texSide!,
+        bassLeft:   audio.bassLeft,
+        bassRight:  audio.bassRight,
+        energy:     audio.energy,
+        bpm:        audio.bpm,
+        beatPhase:  audio.beatPhase,
+        stereo:     audio.stereoWidth,
       ),
       size: Size.infinite,
     );
@@ -122,10 +156,8 @@ class _ShaderCanvasState extends State<ShaderCanvas>
 class _ShaderPainter extends CustomPainter {
   final ui.FragmentShader shader;
   final double            time;
-  final ui.Image          texLeft;
-  final ui.Image          texRight;
-  final ui.Image          texMid;
-  final ui.Image          texSide;
+  final ui.Image          texLeft, texRight, texMid, texSide;
+  final double            bassLeft, bassRight, energy, bpm, beatPhase, stereo;
 
   _ShaderPainter({
     required this.shader,
@@ -134,35 +166,39 @@ class _ShaderPainter extends CustomPainter {
     required this.texRight,
     required this.texMid,
     required this.texSide,
+    required this.bassLeft,
+    required this.bassRight,
+    required this.energy,
+    required this.bpm,
+    required this.beatPhase,
+    required this.stereo,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Texturen (müssen zuerst gesetzt werden)
     shader.setImageSampler(0, texLeft);
     shader.setImageSampler(1, texRight);
     shader.setImageSampler(2, texMid);
     shader.setImageSampler(3, texSide);
 
-    // Floats – exakt in der Reihenfolge wie im Shader deklariert
     int f = 0;
     shader.setFloat(f++, time);
     shader.setFloat(f++, size.width);
     shader.setFloat(f++, size.height);
-    shader.setFloat(f++, 0.6);                    // u_bass_left
-    shader.setFloat(f++, 0.5);                    // u_bass_right
-    shader.setFloat(f++, 0.6);                    // u_energy
-    shader.setFloat(f++, 128.0);                  // u_bpm
-    shader.setFloat(f++, (time * 2.0) % 1.0);    // u_beat_phase
-    shader.setFloat(f++, 0.0);                    // u_beat_onset
-    shader.setFloat(f++, 0.75);                   // u_stereo_width
-    shader.setFloat(f++, 1.2);                    // u_zoom
-    shader.setFloat(f++, 0.3);                    // u_rotation
-    shader.setFloat(f++, 0.1);                    // u_warp_x
-    shader.setFloat(f++, 0.1);                    // u_warp_y
-    shader.setFloat(f++, 0.4);                    // u_param8
-    shader.setFloat(f++, 0.3);                    // u_param9
-    shader.setFloat(f++, 0.8);                    // u_param11
+    shader.setFloat(f++, bassLeft);
+    shader.setFloat(f++, bassRight);
+    shader.setFloat(f++, energy.clamp(0.0, 1.0));
+    shader.setFloat(f++, bpm);
+    shader.setFloat(f++, beatPhase);
+    shader.setFloat(f++, 0.0);           // beat_onset
+    shader.setFloat(f++, stereo.clamp(0.0, 1.0));
+    shader.setFloat(f++, 1.2);           // zoom
+    shader.setFloat(f++, 0.3);           // rotation
+    shader.setFloat(f++, 0.1);           // warp_x
+    shader.setFloat(f++, 0.1);           // warp_y
+    shader.setFloat(f++, 0.4);           // param8
+    shader.setFloat(f++, 0.3);           // param9
+    shader.setFloat(f++, 0.8);           // param11
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
