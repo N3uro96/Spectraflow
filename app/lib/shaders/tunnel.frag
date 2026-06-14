@@ -14,7 +14,7 @@ uniform float u_bass_left;   // 9
 uniform float u_bass_right;  // 10
 
 // ── Seed ───────────────────────────────────────────────────
-uniform float u_seed;        // 11 → DNA wird im Shader abgeleitet
+uniform float u_seed;        // 11
 
 // ── Palette ────────────────────────────────────────────────
 uniform vec3 u_pal_shadow;    // 12–14
@@ -29,107 +29,59 @@ uniform float u_fb_decay;     // 26
 uniform float u_fb_warp_x;    // 27
 uniform float u_fb_warp_y;    // 28
 
-uniform sampler2D u_prev_frame; // sampler 0
+uniform sampler2D u_prev_frame;
 
 out vec4 fragColor;
 
 vec3 pal(float t) {
   t = clamp(t, 0.0, 1.0);
   if (t < 0.333) return mix(u_pal_shadow, u_pal_low,       t * 3.0);
-  if (t < 0.667) return mix(u_pal_low,     u_pal_high,      (t - 0.333) * 3.0);
-                  return mix(u_pal_high,    u_pal_highlight, (t - 0.667) * 3.0);
-}
-
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5);
+  if (t < 0.667) return mix(u_pal_low,    u_pal_high,      (t - 0.333) * 3.0);
+                  return mix(u_pal_high,   u_pal_highlight, (t - 0.667) * 3.0);
 }
 
 float hash_seed(float seed, float salt) {
   return fract(sin(seed * 12.9898 + salt * 78.233) * 43758.5453);
 }
 
-// 2D-Rotation
-vec2 rot2d(vec2 p, float a) {
-  float c = cos(a), s = sin(a);
-  return vec2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-// ── Geometrische Formen im Tunnel ─────────────────────────
-float shape_hex(vec2 uv, float n) {
-  float a = atan(uv.y, uv.x);
-  float r = length(uv);
-  float seg = 6.28318 / n;
-  float a_fold = mod(a + seg * 0.5, seg) - seg * 0.5;
-  float hex = cos(a_fold) * r;
-  return 1.0 - smoothstep(0.02, 0.10, abs(fract(hex * 2.0) - 0.5));
-}
-
-float shape_tri(vec2 uv, float n) {
-  float a = atan(uv.y, uv.x);
-  float tri = abs(sin(a * n));
-  return 1.0 - smoothstep(0.02, 0.18, abs(1.0 - tri));
-}
-
-float shape_grid(vec2 uv, float freq) {
-  vec2 g = fract(uv * freq) - 0.5;
-  return 1.0 - smoothstep(0.02, 0.12, max(abs(g.x), abs(g.y)));
-}
-
-// ── Organische Spiralarme ─────────────────────────────────
-float shape_spiral(vec2 uv, float arms, float freq) {
-  float a = atan(uv.y, uv.x);
-  float r = length(uv);
-  float spiral = sin(arms * a + r * freq + u_time * 0.5);
-  return 1.0 - smoothstep(0.10, 0.35, abs(spiral));
-}
-
-float shape_noise(vec2 uv, float freq) {
-  vec2 q = uv * freq;
-  float n = sin(q.x + sin(q.y + u_time * 0.3) * 1.7)
-          + cos(q.y * 1.3 + sin(q.x * 1.7 - u_time * 0.2) * 1.3);
-  return 1.0 - smoothstep(0.0, 1.2, abs(n) * 0.5);
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5);
 }
 
 void main() {
   // ════════════════════════════════════════════════════════
-  // DNA aus Seed ableiten (20 Parameter)
+  // DNA aus Seed — 20 Parameter, maximale Vielfalt
   // ════════════════════════════════════════════════════════
-  float d_zoom        = 0.7 + hash_seed(u_seed,  1.0) * 0.7;
-  float d_rotation    = (0.4 + hash_seed(u_seed,  2.0) * 1.6)
-                      * (hash_seed(u_seed,  3.0) > 0.5 ? 1.0 : -1.0);
-  float d_warp_x      = (hash_seed(u_seed,  4.0) - 0.5) * 1.4;
-  float d_warp_y      = (hash_seed(u_seed,  5.0) - 0.5) * 1.4;
-  float d_wave_freq   = 1.0 + hash_seed(u_seed,  6.0) * 8.0;
-  float d_color_speed = 0.2 + hash_seed(u_seed,  7.0) * 2.8;
-  float d_spokes      = floor(2.0 + hash_seed(u_seed,  8.0) * 10.0);
-  float d_bass_react  = 0.4 + hash_seed(u_seed,  9.0) * 0.9;
-  float d_mid_react   = 0.4 + hash_seed(u_seed, 10.0) * 0.9;
-  float d_phase       = hash_seed(u_seed, 11.0) * 6.28318;
-  float d_shape_mix   = hash_seed(u_seed, 12.0);              // 0 = geo, 1 = organisch
-  float d_spiral_arms = floor(2.0 + hash_seed(u_seed, 13.0) * 10.0);
-  float d_twist       = (hash_seed(u_seed, 14.0) - 0.5) * 3.5; // Vortex-Twist
-  float d_geo_type    = hash_seed(u_seed, 15.0);              // 0=tri, 0.33=hex, 0.66=grid
-  float d_backward    = hash_seed(u_seed, 16.0) < 0.05 ? -1.0 : 1.0;
-  float d_fog_dense   = 0.3 + hash_seed(u_seed, 17.0) * 0.8;
-  float d_pulse_str   = 0.3 + hash_seed(u_seed, 18.0) * 1.2;
-  float d_stereo_str  = 0.04 + hash_seed(u_seed, 19.0) * 0.22;
-  float d_sog_power   = 0.5 + hash_seed(u_seed, 20.0) * 1.5;  // Sog-Stärke
+  float d_sides       = floor(3.0 + hash_seed(u_seed,  1.0) * 7.0); // 3–9 Ecken
+  float d_cross_mix   = hash_seed(u_seed,  2.0);                     // 0=Kreis, 1=Polygon
+  float d_speed       = 0.2 + hash_seed(u_seed,  3.0) * 1.6;        // Fluggeschwindigkeit
+  float d_rotation    = (hash_seed(u_seed,  4.0) * 2.0 - 1.0) * 0.7;
+  float d_twist       = (hash_seed(u_seed,  5.0) * 2.0 - 1.0) * 4.0; // Spiralverdrehung
+  float d_bass_expand = 0.3 + hash_seed(u_seed,  6.0) * 0.8;        // Bass → Aufweitung
+  float d_bass_speed  = hash_seed(u_seed,  7.0) * 0.7;              // Bass → Speed
+  float d_pattern_type= hash_seed(u_seed,  8.0);                     // 0=Geo 0.5=Organik 1=Neon
+  float d_wave_freq   = 2.0 + hash_seed(u_seed,  9.0) * 10.0;
+  float d_warp_x      = (hash_seed(u_seed, 10.0) - 0.5) * 2.0;
+  float d_warp_y      = (hash_seed(u_seed, 11.0) - 0.5) * 2.0;
+  float d_color_speed = 0.1 + hash_seed(u_seed, 12.0) * 1.8;
+  float d_phase       = hash_seed(u_seed, 13.0) * 6.28318;
+  float d_fog_dense   = 0.3 + hash_seed(u_seed, 14.0) * 0.7;
+  float d_pulse_str   = 0.4 + hash_seed(u_seed, 15.0) * 1.2;
+  float d_mid_react   = 0.3 + hash_seed(u_seed, 16.0) * 0.9;
+  float d_high_react  = 0.3 + hash_seed(u_seed, 17.0) * 0.9;
+  float d_stereo_str  = 0.03 + hash_seed(u_seed, 18.0) * 0.18;
+  float d_ring_freq   = 1.5 + hash_seed(u_seed, 19.0) * 4.0;
+  float d_backward    = hash_seed(u_seed, 20.0) < 0.06 ? -1.0 : 1.0; // 6% rückwärts
 
-  // UV
+  // ── UV Setup ────────────────────────────────────────────
   vec2 uv_raw = FlutterFragCoord().xy / vec2(u_width, u_height);
   vec2 uv     = uv_raw * 2.0 - 1.0;
   uv.x       *= u_width / u_height;
+  vec2 uv0    = uv; // unverändertes UV für Glow/Vignette
 
-  // ── Stereo: Fluchtpunkt verschiebt sich ─────────────────
+  // ── Stereo: Fluchtpunkt links/rechts verschieben ─────────
   float lr_diff = u_bass_right - u_bass_left;
-  float stereo_shift_x = lr_diff * d_stereo_str * u_stereo;
-  float stereo_shift_y = (u_bass_left + u_bass_right - 1.0) * d_stereo_str * 0.3 * u_stereo;
-  uv -= vec2(stereo_shift_x, stereo_shift_y);
-
-  vec2 uv0 = uv;
-
-  float r = length(uv);
-  float a = atan(uv.y, uv.x);
+  uv.x -= lr_diff * d_stereo_str * u_stereo;
 
   // ── Beat / BPM ──────────────────────────────────────────
   float beat_dur   = 60.0 / max(u_bpm, 60.0);
@@ -137,115 +89,127 @@ void main() {
   float beat_phase = fract(u_time / beat_dur);
   float beat_kick  = exp(-beat_phase * 8.0);
 
-  // Takt-Snap: Bewegung wird quantisiert + weicher Übergang im Beat
-  float snap_time = beat_count * beat_dur + pow(beat_phase, 1.6) * beat_dur;
+  // ── Polar-Koordinaten ───────────────────────────────────
+  float r     = length(uv);
+  float angle = atan(uv.y, uv.x);
 
-  // ── Bass-Expansion + Sog ────────────────────────────────
-  float bass_expand = u_bass * d_bass_react * 0.35 + beat_kick * 0.12;
-  float z = 1.0 / max(r, 0.001);
-  z += bass_expand;
+  // ── Rotation + Twist ─────────────────────────────────────
+  // Twist: Pixel weiter vom Zentrum drehen sich mehr → Spiraleffekt
+  angle += u_time * d_rotation * 0.12
+         + u_mid  * d_mid_react * 0.28
+         + r      * d_twist     * 0.18;
 
-  // Sog: Geschwindigkeit nimmt mit Tiefe zu
-  float sog = pow(z / 8.0, d_sog_power);
+  // ── Polygon-Querschnitt ─────────────────────────────────
+  // d_cross_mix=0 → reiner Kreis, d_cross_mix=1 → scharfes Polygon
+  float seg    = 6.28318 / max(d_sides, 2.0);
+  float a_snap = mod(angle + seg * 0.5, seg) - seg * 0.5;
+  float poly_r = cos(a_snap);                               // 1.0 an der Seite, <1 an Ecken
+  float eff_r  = mix(r, r / max(poly_r, 0.01), d_cross_mix);
 
-  // Rückwärts-Modus: selten (5%) — Ringe fliegen auf Betrachter zu
-  float travel_dir = d_backward;
+  // ── Tunnel-Tiefe ────────────────────────────────────────
+  float z = 1.0 / max(eff_r, 0.001);
 
-  // Rotation mit Vortex-Twist (Tiefe verdreht Winkel)
-  a += u_time * d_rotation * 0.12
-     + u_mid * d_mid_react * 0.22
-     + z * d_twist * 0.15;
+  // Bass: Aufweitung (z erhöhen → Ringe fliegen auf dich zu)
+  z += u_bass * d_bass_expand * 1.8;
 
-  // Kamera-Shake
-  float shake = beat_kick * u_energy * 0.035;
-  uv.x += (hash(vec2(u_time * 1.3, 0.0)) - 0.5) * shake;
-  uv.y += (hash(vec2(0.0, u_time * 1.7)) - 0.5) * shake;
+  // Beat-Puls: Tunnel weitet sich kurz aus, zieht sich zusammen
+  z *= 1.0 + beat_kick * d_pulse_str * 0.4;
 
-  // ── Tunnel-Oberflächen-UVs ──────────────────────────────
-  float depth_scale = d_zoom * 0.55;
-  float base_speed  = 0.4 + d_zoom * 0.5;
-  float u_t = z * depth_scale
-            - snap_time * base_speed * travel_dir
-            - sog * 0.4 * travel_dir;
-  float u_s = a / 6.28318;
+  // ── Tunnel-UVs ──────────────────────────────────────────
+  float speed = d_speed + u_bass * d_bass_speed * 0.5;
+  float u_t   = z * 0.22 - u_time * speed * d_backward;
+  float u_s   = angle / 6.28318; // 0..1 um den Tunnel herum
 
-  // Warp auf Oberfläche
-  float mid_warp = u_mid * d_mid_react * 0.2;
-  u_t += sin(u_s * d_wave_freq + u_time * 0.4) * (d_warp_x + mid_warp) * 0.22;
-  u_s += cos(u_t * d_wave_freq - u_time * 0.35) * (d_warp_y + mid_warp * 0.7) * 0.22;
+  // ── Mid-Warp auf Tunnel-Wand ────────────────────────────
+  float mid_boost = u_mid * d_mid_react * 0.2;
+  u_t += sin(u_s * d_wave_freq       + u_time * 0.5) * (d_warp_x + mid_boost) * 0.15;
+  u_s += cos(u_t * d_wave_freq * 0.5 - u_time * 0.4) * (d_warp_y + mid_boost * 0.7) * 0.12;
 
-  // ── Tiefen-Fog ──────────────────────────────────────────
-  float fog = smoothstep(0.0, 8.0, z) * d_fog_dense;
-  float depth_brightness = 1.0 - fog;
+  // ── Kamera-Shake auf Beat ────────────────────────────────
+  float shake = beat_kick * u_energy * 0.022;
+  uv.x += (hash(vec2(u_time * 1.3, 0.2)) - 0.5) * shake;
+  uv.y += (hash(vec2(0.2, u_time * 1.7)) - 0.5) * shake;
 
-  // ── Muster-Layer ────────────────────────────────────────
-  vec2 tuv = vec2(u_t, u_s * 6.28318);
+  // ════════════════════════════════════════════════════════
+  // MUSTER — Seed mischt drei Stile
+  // ════════════════════════════════════════════════════════
 
-  // Geometrischer Layer
-  float geo_shape;
-  if (d_geo_type < 0.33) {
-    geo_shape = shape_tri(tuv, d_spokes);
-  } else if (d_geo_type < 0.66) {
-    geo_shape = shape_hex(tuv, d_spokes);
+  // — GEOMETRISCH: Ringe + Speichen —
+  float ring_pos   = fract(u_t * d_ring_freq) - 0.5;
+  float ring_thick = 0.05 + u_high * d_high_react * 0.2;
+  float rings      = 1.0 - smoothstep(ring_thick, ring_thick + 0.18, abs(ring_pos));
+
+  float spoke_pos  = fract(u_s * d_sides) - 0.5;
+  float spoke_w    = 0.04 + u_bass * 0.07;
+  float spokes     = 1.0 - smoothstep(spoke_w, spoke_w + 0.14, abs(spoke_pos));
+  float geo        = max(rings, spokes * 0.8);
+
+  // — ORGANISCH: Überlagerte Plasma-Wellen —
+  vec2  puv    = vec2(u_t * 0.25, u_s * 6.28318);
+  float p1     = sin(puv.x * d_wave_freq * 0.5 + u_time * 0.6 + d_phase);
+  float p2     = cos(puv.y * d_wave_freq * 0.18 - u_time * 0.35);
+  float p3     = sin(length(puv) * d_wave_freq * 0.15 - u_time * 0.5);
+  float p4     = cos(puv.x * 0.3 + puv.y * 0.4 + u_time * 0.45);
+  float organic= clamp(0.5 + (p1 * p2 + p3 * p4) * 0.35, 0.0, 1.0);
+
+  // — NEON: Scharfe leuchtende Gitter-Linien —
+  float nr   = fract(u_t * d_ring_freq * 0.5) - 0.5;
+  float ns   = fract(u_s * d_sides    * 0.5) - 0.5;
+  float neon = clamp(0.028 / (abs(nr) + 0.009), 0.0, 1.0)
+             + clamp(0.018 / (abs(ns) + 0.007), 0.0, 1.0) * 0.75;
+  neon = clamp(neon, 0.0, 1.0);
+
+  // — BLEND: d_pattern_type 0→Geo 0.5→Organik 1→Neon —
+  float pattern;
+  if (d_pattern_type < 0.5) {
+    pattern = mix(geo, organic, d_pattern_type * 2.0);
   } else {
-    geo_shape = shape_grid(tuv, d_wave_freq);
+    pattern = mix(organic, neon, (d_pattern_type - 0.5) * 2.0);
   }
 
-  // Organischer Layer
-  float org_spiral = shape_spiral(tuv, d_spiral_arms, d_wave_freq);
-  float org_noise  = shape_noise(tuv, d_wave_freq * 0.7);
-  float organic    = mix(org_spiral, org_noise, 0.4);
+  // Beat-Puls auf Pattern-Helligkeit
+  pattern *= 1.0 + beat_kick * d_pulse_str * 0.35;
 
-  // Ringe (immer als Tiefendisziplin)
-  float ring_freq = 2.5 + d_wave_freq * 0.5;
-  float ring_pos  = fract(u_t * ring_freq) - 0.5;
-  float ring_thick = 0.015 + u_high * 0.15 + u_bass * d_bass_react * 0.04;
-  float rings = 1.0 - smoothstep(ring_thick, ring_thick + 0.22, abs(ring_pos) * (1.0 + u_high * 0.6));
-
-  // Kombination: Seed bestimmt Geo/Organik-Anteil, Ringe sind immer dabei
-  float pattern = mix(geo_shape, organic, d_shape_mix);
-  pattern = max(pattern, rings * 0.6);
-
-  // Beat-Pulse auf Pattern
-  pattern *= 1.0 + beat_kick * d_pulse_str;
-  pattern = clamp(pattern * depth_brightness, 0.0, 1.0);
+  // Tiefenfog
+  float fog = smoothstep(0.0, 9.0, z) * d_fog_dense;
+  pattern   = clamp(pattern * (1.0 - fog), 0.0, 1.0);
 
   // ── Farbe ───────────────────────────────────────────────
-  float hue_z = fract(u_t * 0.12 * d_color_speed);
-  float hue_a = fract(u_s * 0.6 * d_color_speed);
-  float hue_b = fract(beat_count * 0.1 + d_phase / 6.28318); // BPM-getriebene Farbwechsel
-  float hue   = fract(hue_z + hue_a * 0.3 + hue_b * 0.15);
-  vec3 col    = pal(hue) * pattern;
+  float hue_depth = fract(u_t * 0.09 * d_color_speed);
+  float hue_angle = fract(u_s * 0.35 * d_color_speed);
+  float hue_beat  = fract(beat_count * 0.08 + d_phase / 6.28318);
+  float hue       = fract(hue_depth + hue_angle * 0.3 + hue_beat * 0.18);
 
-  // High-Zittern auf Farbe
-  col += u_pal_highlight * u_high * 0.12 * pattern;
+  vec3 col = pal(hue) * pattern;
 
-  // Zentraler Glow
-  float glow = exp(-r * (1.8 - u_energy));
-  col += u_pal_low * glow * 0.2;
-  col += u_pal_high * glow * beat_kick * 0.8;
+  // High → Glitzern auf Mustern
+  col += u_pal_highlight * u_high * d_high_react * 0.2 * pattern;
 
-  // Beat Flash
-  col += beat_kick * 0.06 * u_pal_highlight;
+  // ── Zentraler Glow ───────────────────────────────────────
+  float glow = exp(-length(uv0) * (1.8 - u_energy * 0.7));
+  col += u_pal_low  * glow * 0.25;
+  col += u_pal_high * glow * beat_kick * 0.65;
 
-  // Stereo-L/R Leuchtbögen
-  float s_off = u_stereo * 0.04;
-  col += u_pal_low  * exp(-length(uv + vec2(s_off * u_bass_left,  0.0)) * 5.0) * u_bass_left  * u_stereo * 0.18;
-  col += u_pal_low  * exp(-length(uv - vec2(s_off * u_bass_right, 0.0)) * 5.0) * u_bass_right * u_stereo * 0.18;
-  col += u_pal_high * exp(-length(uv + vec2(s_off * 2.0, 0.0)) * 4.0) * u_mid * u_stereo * 0.1;
+  // ── Beat-Flash ──────────────────────────────────────────
+  col += beat_kick * 0.055 * u_pal_highlight;
 
-  // Vignette
+  // ── Stereo-L/R Leuchtbögen ───────────────────────────────
+  float s_off = u_stereo * 0.045;
+  col += u_pal_low * exp(-length(uv0 + vec2( s_off * u_bass_left,  0.0)) * 5.0) * u_bass_left  * u_stereo * 0.2;
+  col += u_pal_low * exp(-length(uv0 - vec2( s_off * u_bass_right, 0.0)) * 5.0) * u_bass_right * u_stereo * 0.2;
+
+  // ── Vignette (screen-space, kein AR) ────────────────────
   vec2  vig_uv = uv_raw * 2.0 - 1.0;
   float vig    = 1.0 - smoothstep(0.5, 1.5, dot(vig_uv, vig_uv));
   col         *= vig;
 
-  // ── Feedback ────────────────────────────────────────────
-  vec2 fb = uv_raw - 0.5;
-  fb /= u_fb_zoom;
+  // ── Milkdrop Feedback ────────────────────────────────────
+  vec2 fb  = uv_raw - 0.5;
+  fb      /= u_fb_zoom;
   float co = cos(-u_fb_rotation), si = sin(-u_fb_rotation);
-  fb = vec2(fb.x * co - fb.y * si, fb.x * si + fb.y * co);
-  fb.x += sin(fb.y * 8.0 + u_time * 0.7) * u_fb_warp_x;
-  fb.y += cos(fb.x * 8.0 - u_time * 0.5) * u_fb_warp_y;
+  fb       = vec2(fb.x * co - fb.y * si, fb.x * si + fb.y * co);
+  fb.x    += sin(fb.y * 8.0 + u_time * 0.7) * u_fb_warp_x;
+  fb.y    += cos(fb.x * 8.0 - u_time * 0.5) * u_fb_warp_y;
   vec2 fb_uv = fb + 0.5;
   vec2 ef    = smoothstep(vec2(0.0), vec2(0.04), fb_uv)
              * (vec2(1.0) - smoothstep(vec2(0.96), vec2(1.0), fb_uv));
