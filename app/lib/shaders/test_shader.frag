@@ -40,6 +40,54 @@ vec3 hsv2rgb(vec3 c) {
     return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
+// SkSL erlaubt keine dynamischen Array-Indizes
+// Wir sampeln die FFT Bänder als kontinuierliche Kurve
+float sampleFFT(float x, float[32] bands) {
+    float pos    = clamp(x * 31.0, 0.0, 31.0);
+    float pos_lo = floor(pos);
+    float pos_hi = ceil(pos);
+    float t      = fract(pos);
+
+    // Manuelles Lookup für die zwei nächsten Bänder
+    // via stufenweise if-Kette (SkSL kompatibel)
+    float lo = 0.0;
+    float hi = 0.0;
+
+    if (pos_lo < 1.0)       { lo = bands[0];  hi = bands[1];  }
+    else if (pos_lo < 2.0)  { lo = bands[1];  hi = bands[2];  }
+    else if (pos_lo < 3.0)  { lo = bands[2];  hi = bands[3];  }
+    else if (pos_lo < 4.0)  { lo = bands[3];  hi = bands[4];  }
+    else if (pos_lo < 5.0)  { lo = bands[4];  hi = bands[5];  }
+    else if (pos_lo < 6.0)  { lo = bands[5];  hi = bands[6];  }
+    else if (pos_lo < 7.0)  { lo = bands[6];  hi = bands[7];  }
+    else if (pos_lo < 8.0)  { lo = bands[7];  hi = bands[8];  }
+    else if (pos_lo < 9.0)  { lo = bands[8];  hi = bands[9];  }
+    else if (pos_lo < 10.0) { lo = bands[9];  hi = bands[10]; }
+    else if (pos_lo < 11.0) { lo = bands[10]; hi = bands[11]; }
+    else if (pos_lo < 12.0) { lo = bands[11]; hi = bands[12]; }
+    else if (pos_lo < 13.0) { lo = bands[12]; hi = bands[13]; }
+    else if (pos_lo < 14.0) { lo = bands[13]; hi = bands[14]; }
+    else if (pos_lo < 15.0) { lo = bands[14]; hi = bands[15]; }
+    else if (pos_lo < 16.0) { lo = bands[15]; hi = bands[16]; }
+    else if (pos_lo < 17.0) { lo = bands[16]; hi = bands[17]; }
+    else if (pos_lo < 18.0) { lo = bands[17]; hi = bands[18]; }
+    else if (pos_lo < 19.0) { lo = bands[18]; hi = bands[19]; }
+    else if (pos_lo < 20.0) { lo = bands[19]; hi = bands[20]; }
+    else if (pos_lo < 21.0) { lo = bands[20]; hi = bands[21]; }
+    else if (pos_lo < 22.0) { lo = bands[21]; hi = bands[22]; }
+    else if (pos_lo < 23.0) { lo = bands[22]; hi = bands[23]; }
+    else if (pos_lo < 24.0) { lo = bands[23]; hi = bands[24]; }
+    else if (pos_lo < 25.0) { lo = bands[24]; hi = bands[25]; }
+    else if (pos_lo < 26.0) { lo = bands[25]; hi = bands[26]; }
+    else if (pos_lo < 27.0) { lo = bands[26]; hi = bands[27]; }
+    else if (pos_lo < 28.0) { lo = bands[27]; hi = bands[28]; }
+    else if (pos_lo < 29.0) { lo = bands[28]; hi = bands[29]; }
+    else if (pos_lo < 30.0) { lo = bands[29]; hi = bands[30]; }
+    else                    { lo = bands[30]; hi = bands[31]; }
+
+    return mix(lo, hi, t);
+}
+
 void main() {
     vec2 fragCoord = FlutterFragCoord().xy;
     vec2 uv        = fragCoord / u_resolution;
@@ -58,8 +106,8 @@ void main() {
 
         for (int i = 0; i < 4; i++) {
             float fi = float(i);
-            p = abs(p) / dot(p, p) - 0.9 + u_params[i] * 0.1;
-            p = rot(u_time * 0.05 * (fi + 1.0) * u_params[8]) * p;
+            p  = abs(p) / dot(p, p) - 0.9 + u_params[i] * 0.1;
+            p  = rot(u_time * 0.05 * (fi + 1.0) * u_params[8]) * p;
         }
 
         float hue = u_time * u_params[9] * 0.05
@@ -70,23 +118,20 @@ void main() {
         col += hsv2rgb(vec3(hue, sat, val)) * 0.6;
     }
 
-    // ── FFT Bänder (oben) ──
+    // ── FFT Bänder (oben) – kontinuierlich gesampelt ──
     {
         float bar_height = 0.15;
         float bar_y      = 1.0 - bar_height;
 
         if (uv.y > bar_y) {
             float local_y = (uv.y - bar_y) / bar_height;
-            // Fix: float Index statt int clamp
-            int band = int(clamp(uv.x * 32.0, 0.0, 31.0));
-
-            float left  = u_env_left[band];
-            float right = u_env_right[band];
+            float left    = sampleFFT(uv.x, u_env_left);
+            float right   = sampleFFT(uv.x, u_env_right);
 
             float is_left  = step(local_y, left);
             float is_right = step(local_y, right);
 
-            vec3 band_col = vec3(0.0);
+            vec3 band_col  = vec3(0.0);
             band_col += vec3(0.2, 1.0, 0.4) * is_left  * 0.8;
             band_col += vec3(0.2, 0.4, 1.0) * is_right * 0.8;
             band_col *= 1.0 + u_beat_onset * 0.5;
@@ -102,11 +147,8 @@ void main() {
 
         if (uv.x > bar_x) {
             float local_x = (uv.x - bar_x) / bar_width;
-            // Fix: float Index statt int clamp
-            int band = int(clamp(uv.y * 32.0, 0.0, 31.0));
-
-            float mid  = u_fft_mid[band];
-            float side = u_fft_side[band];
+            float mid     = sampleFFT(uv.y, u_fft_mid);
+            float side    = sampleFFT(uv.y, u_fft_side);
 
             float is_mid  = step(1.0 - local_x, mid);
             float is_side = step(1.0 - local_x, side * u_stereo_width);
