@@ -6,56 +6,32 @@ import '../../core/audio_data_provider.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/shader_canvas.dart';
-import '../widgets/fft_display.dart';
 
-class VisualizerScreen extends StatefulWidget {
+class VisualizerScreen extends StatelessWidget {
   const VisualizerScreen({super.key});
 
   @override
-  State<VisualizerScreen> createState() => _VisualizerScreenState();
-}
-
-class _VisualizerScreenState extends State<VisualizerScreen> {
-  int _shaderIndex  = 0;
-  int _paletteIndex = 0;
-
-  final List<String> _shaderNames = [
-    'NEBULA', 'VORTEX', 'FRACTAL', 'PLASMA',
-    'CRYSTAL', 'AURORA', 'WARP', 'PRISM',
-  ];
-
-  final List<Color> _paletteColors = [
-    const Color(0xFF6C63FF),
-    const Color(0xFFFF6584),
-    const Color(0xFF43E97B),
-    const Color(0xFFFA8231),
-    const Color(0xFF00D2FF),
-    const Color(0xFFFFD700),
-  ];
-
-  @override
   Widget build(BuildContext context) {
-    final audio     = context.watch<AudioManager>();
-    final audioData = context.watch<AudioDataProvider>();
+    // Nur AudioManager – ändert sich selten
+    final audio = context.watch<AudioManager>();
+    // AudioDataProvider nur via context.read – KEIN watch!
+    final audioData = context.read<AudioDataProvider>();
 
     return Scaffold(
       backgroundColor: SFTheme.background,
       body: Stack(
         children: [
-          // Shader Hintergrund
+          // Canvas – hat eigenen Repaint Listener
           Positioned.fill(child: ShaderCanvas(audioData: audioData)),
 
-          // FFT Bänder + Stereo Meter (Canvas, kein Shader)
-          Positioned.fill(child: FFTDisplay(audioData: audioData)),
-
-          // UI Overlay
           SafeArea(
             child: Column(
               children: [
-                _buildTopBar(audioData),
+                // Nur BPM/Stereo Werte brauchen Audio Updates
+                _TopBar(audioData: audioData),
                 const Spacer(),
-                if (audio.fileName != null) _buildNowPlaying(audio),
-                _buildBottomPanel(audio),
+                if (audio.fileName != null) _NowPlaying(audio: audio),
+                _BottomPanel(audio: audio),
               ],
             ),
           ),
@@ -63,8 +39,17 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       ),
     );
   }
+}
 
-  Widget _buildTopBar(AudioDataProvider data) {
+// ─────────────────────────────────────────
+// Top Bar – eigener ListenableBuilder
+// ─────────────────────────────────────────
+class _TopBar extends StatelessWidget {
+  final AudioDataProvider audioData;
+  const _TopBar({required this.audioData});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
@@ -73,33 +58,50 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             style: SFTheme.labelSmall.copyWith(
               letterSpacing: 3.0, color: SFTheme.textPrimary)),
           const Spacer(),
-          GlassContainer(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            borderRadius: SFTheme.radiusSm,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('${data.bpm.toStringAsFixed(0)}',
-                  style: SFTheme.titleMedium),
-              const SizedBox(width: 4),
-              Text('BPM', style: SFTheme.labelSmall),
-            ]),
-          ),
-          const SizedBox(width: 10),
-          GlassContainer(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            borderRadius: SFTheme.radiusSm,
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('${(data.stereoWidth * 100).toStringAsFixed(0)}%',
-                  style: SFTheme.titleMedium),
-              const SizedBox(width: 4),
-              Text('STEREO', style: SFTheme.labelSmall),
-            ]),
+          // Nur diese zwei Werte updaten sich
+          ListenableBuilder(
+            listenable: audioData,
+            builder: (_, __) => Row(
+              children: [
+                GlassContainer(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  borderRadius: SFTheme.radiusSm,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('${audioData.bpm.toStringAsFixed(0)}',
+                        style: SFTheme.titleMedium),
+                    const SizedBox(width: 4),
+                    Text('BPM', style: SFTheme.labelSmall),
+                  ]),
+                ),
+                const SizedBox(width: 10),
+                GlassContainer(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  borderRadius: SFTheme.radiusSm,
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Text('${(audioData.stereoWidth * 100).toStringAsFixed(0)}%',
+                        style: SFTheme.titleMedium),
+                    const SizedBox(width: 4),
+                    Text('STEREO', style: SFTheme.labelSmall),
+                  ]),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     ).animate().fadeIn(duration: 600.ms);
   }
+}
 
-  Widget _buildNowPlaying(AudioManager audio) {
+// ─────────────────────────────────────────
+// Now Playing – statisch, ändert sich selten
+// ─────────────────────────────────────────
+class _NowPlaying extends StatelessWidget {
+  final AudioManager audio;
+  const _NowPlaying({required this.audio});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: GlassContainer(
@@ -131,8 +133,36 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       ),
     ).animate().fadeIn(duration: 300.ms);
   }
+}
 
-  Widget _buildBottomPanel(AudioManager audio) {
+// ─────────────────────────────────────────
+// Bottom Panel – statisch, keine Audio Updates
+// ─────────────────────────────────────────
+class _BottomPanel extends StatefulWidget {
+  final AudioManager audio;
+  const _BottomPanel({required this.audio});
+
+  @override
+  State<_BottomPanel> createState() => _BottomPanelState();
+}
+
+class _BottomPanelState extends State<_BottomPanel> {
+  int _shaderIndex  = 0;
+  int _paletteIndex = 0;
+
+  final List<String> _shaderNames = [
+    'NEBULA', 'VORTEX', 'FRACTAL', 'PLASMA',
+    'CRYSTAL', 'AURORA', 'WARP', 'PRISM',
+  ];
+
+  final List<Color> _paletteColors = [
+    const Color(0xFF6C63FF), const Color(0xFFFF6584),
+    const Color(0xFF43E97B), const Color(0xFFFA8231),
+    const Color(0xFF00D2FF), const Color(0xFFFFD700),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(20),
       child: GlassContainer(
@@ -145,7 +175,7 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             const SizedBox(height: 20),
             _buildPaletteSelector(),
             const SizedBox(height: 24),
-            _buildPlaybackControls(audio),
+            _buildPlaybackControls(),
           ],
         ),
       ),
@@ -235,7 +265,8 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
     );
   }
 
-  Widget _buildPlaybackControls(AudioManager audio) {
+  Widget _buildPlaybackControls() {
+    final audio = widget.audio;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
