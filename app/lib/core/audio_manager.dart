@@ -24,15 +24,18 @@ class AudioManager extends ChangeNotifier {
   Future<bool> startMicrophone() async {
     final status = await Permission.microphone.request();
     if (!status.isGranted) return false;
+    
     await _ensureInit();
     await NativeBridge.stop();
     final ok = await NativeBridge.startMicrophone();
     if (!ok) return false;
-    _source    = AudioSource.microphone;
+    
+    _source = AudioSource.microphone; 
     _isPlaying = true;
-    _filePath  = null; // Fix: State sauber halten
-    _fileName  = null;
-    notifyListeners();
+    _filePath = null; // FIX: Zurücksetzen beim Mikrofon-Start
+    _fileName = null; // FIX: Zurücksetzen beim Mikrofon-Start
+    
+    notifyListeners(); 
     return true;
   }
 
@@ -42,18 +45,23 @@ class AudioManager extends ChangeNotifier {
       allowedExtensions: ['mp3', 'wav', 'flac', 'aac', 'm4a'],
       allowMultiple: false,
     );
+    
     if (result == null || result.files.isEmpty) return false;
     final file = result.files.first;
     if (file.path == null) return false;
+    
     await _ensureInit();
     await NativeBridge.stop();
+    
     final ok = await NativeBridge.startFilePlayback(file.path!);
     if (!ok) return false;
-    _filePath  = file.path;
-    _fileName  = file.name;
-    _source    = AudioSource.file;
+    
+    _filePath = file.path; 
+    _fileName = file.name;
+    _source = AudioSource.file;
     _isPlaying = true;
-    notifyListeners();
+    
+    notifyListeners(); 
     return true;
   }
 
@@ -75,10 +83,10 @@ class AudioManager extends ChangeNotifier {
 
   Future<void> stop() async {
     await NativeBridge.stop();
-    _isPlaying = false;
-    _source    = AudioSource.none;
-    _filePath  = null;
-    _fileName  = null;
+    _isPlaying = false; 
+    _source = AudioSource.none;
+    _filePath = null;
+    _fileName = null;
     notifyListeners();
   }
 }
