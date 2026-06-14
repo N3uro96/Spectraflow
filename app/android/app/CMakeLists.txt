@@ -5,10 +5,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ─────────────────────────────────────────
-# Oboe (Low-Latency Android Audio)
+# Oboe via FetchContent (automatischer Download)
 # ─────────────────────────────────────────
-set(OBOE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../core/oboe)
-add_subdirectory(${OBOE_DIR} oboe)
+include(FetchContent)
+FetchContent_Declare(
+    oboe
+    GIT_REPOSITORY https://github.com/google/oboe.git
+    GIT_TAG        main
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(oboe)
 
 # ─────────────────────────────────────────
 # kissfft
@@ -35,7 +41,7 @@ add_library(spectraflow_core SHARED
 
 target_include_directories(spectraflow_core PRIVATE
     ${CORE_DIR}
-    ${OBOE_DIR}/include
+    ${oboe_SOURCE_DIR}/include
 )
 
 target_link_libraries(spectraflow_core
