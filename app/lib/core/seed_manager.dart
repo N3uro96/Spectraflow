@@ -1,0 +1,34 @@
+import 'package:flutter/material.dart';
+import 'dart:math';
+
+class SeedManager extends ChangeNotifier {
+  int _currentSeed   = 0;
+  int _currentShader = 0;
+
+  int get currentSeed   => _currentSeed;
+  int get currentShader => _currentShader;
+
+  SeedManager() {
+    _currentSeed = _randomSeed();
+  }
+
+  // Neuen zufälligen Seed generieren
+  void randomize() {
+    _currentSeed = _randomSeed();
+    notifyListeners();
+  }
+
+  // Shader wechseln
+  void setShader(int id) {
+    _currentShader = id;
+    notifyListeners();
+  }
+
+  // Seed manuell setzen (später für KI)
+  void setSeed(int seed) {
+    _currentSeed = seed;
+    notifyListeners();
+  }
+
+  int _randomSeed() => Random().nextInt(999999999);
+}
