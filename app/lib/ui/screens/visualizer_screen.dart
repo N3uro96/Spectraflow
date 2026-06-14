@@ -6,7 +6,6 @@ import '../../core/audio_data_provider.dart';
 import '../../core/fps_counter.dart';
 import '../../core/seed_manager.dart';
 import '../../core/palette_manager.dart';
-import '../../core/dna_generator.dart';
 import '../widgets/visualizer_widget.dart' show kShaderPaths, kShaderNames;
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
@@ -21,7 +20,6 @@ class VisualizerScreen extends StatelessWidget {
     final audioData = context.read<AudioDataProvider>();
     final seeds     = context.watch<SeedManager>();
     final palettes  = context.watch<PaletteManager>();
-    final dna       = DNAGenerator.generate(seeds.currentSeed);
     final shaderIdx = seeds.currentShader % kShaderPaths.length;
 
     return Scaffold(
@@ -31,7 +29,7 @@ class VisualizerScreen extends StatelessWidget {
           Positioned.fill(
             child: VisualizerWidget(
               audioData:   audioData,
-              dna:         dna,
+              seed:        seeds.currentSeed,
               palette:     palettes.current,
               shaderPath:  kShaderPaths[shaderIdx],
               onTap:       palettes.next,

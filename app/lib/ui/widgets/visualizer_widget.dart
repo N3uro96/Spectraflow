@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:provider/provider.dart';
 import '../../core/audio_data_provider.dart';
-import '../../core/dna_generator.dart';
 import '../../core/feedback_state.dart';
 import '../../core/fps_counter.dart';
 import '../../core/palette_data.dart';
@@ -19,7 +18,7 @@ const List<String> kShaderNames = ['SMOKE', 'TUNNEL', 'PLASMA', 'PARTICLES'];
 
 class VisualizerWidget extends StatefulWidget {
   final AudioDataProvider audioData;
-  final DNAParams         dna;
+  final int               seed;
   final SFPalette         palette;
   final String            shaderPath;
   final VoidCallback?     onTap;
@@ -28,7 +27,7 @@ class VisualizerWidget extends StatefulWidget {
   const VisualizerWidget({
     super.key,
     required this.audioData,
-    this.dna        = DNAParams.defaults,
+    this.seed       = 0,
     required this.palette,
     this.shaderPath = 'lib/shaders/smoke.frag',
     this.onTap,
@@ -116,7 +115,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     final dt = ((ms - _lastMs) / 1000.0).clamp(0.0, 0.05);
     _lastMs  = ms;
     _time    = ms / 1000.0;
-    _feedback.update(widget.dna, widget.audioData, dt, _time);
+    _feedback.update(widget.audioData, dt, _time);
     _fpsCounter?.tick(_time);
     setState(() {});
   }
@@ -157,7 +156,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
             stereo:     audio.stereoWidth.clamp(0.0, 1.0),
             bassLeft:   audio.bassLeft.clamp(0.0, 1.0),
             bassRight:  audio.bassRight.clamp(0.0, 1.0),
-            dna:        widget.dna,
+            seed:       widget.seed,
             palette:    widget.palette,
             feedback:   _feedback,
             prevFrame:  _prevFrame!,
@@ -174,7 +173,7 @@ class _TunnelPainter extends CustomPainter {
   final ui.FragmentShader          shader;
   final double                     time, bass, mid, high, energy, bpm, stereo;
   final double                     bassLeft, bassRight;
-  final DNAParams                  dna;
+  final int                        seed;
   final SFPalette                  palette;
   final FeedbackState              feedback;
   final ui.Image                   prevFrame;
@@ -191,7 +190,7 @@ class _TunnelPainter extends CustomPainter {
     required this.stereo,
     required this.bassLeft,
     required this.bassRight,
-    required this.dna,
+    required this.seed,
     required this.palette,
     required this.feedback,
     required this.prevFrame,
@@ -214,7 +213,7 @@ class _TunnelPainter extends CustomPainter {
     final recorder  = ui.PictureRecorder();
     final offCanvas = Canvas(recorder);
 
-    // Float-Uniforms setzen (Indices 0–37)
+    // Float-Uniforms setzen (Indices 0–28)
     int f = 0;
     // Audio (0–10)
     shader.setFloat(f++, time);
@@ -228,23 +227,14 @@ class _TunnelPainter extends CustomPainter {
     shader.setFloat(f++, stereo);
     shader.setFloat(f++, bassLeft);
     shader.setFloat(f++, bassRight);
-    // DNA (11–20)
-    shader.setFloat(f++, dna.zoom);
-    shader.setFloat(f++, dna.rotation);
-    shader.setFloat(f++, dna.warpX);
-    shader.setFloat(f++, dna.warpY);
-    shader.setFloat(f++, dna.waveFreq);
-    shader.setFloat(f++, dna.colorSpeed);
-    shader.setFloat(f++, dna.spokes);
-    shader.setFloat(f++, dna.bassReact);
-    shader.setFloat(f++, dna.midReact);
-    shader.setFloat(f++, dna.phase);
-    // Palette (21–32)
+    // Seed (11) — Shader leitet DNA intern ab
+    shader.setFloat(f++, seed.toDouble());
+    // Palette (12–23)
     _setColor(f, palette.shadow);    f += 3;
     _setColor(f, palette.low);       f += 3;
     _setColor(f, palette.high);      f += 3;
     _setColor(f, palette.highlight); f += 3;
-    // Feedback (33–37)
+    // Feedback (24–28)
     shader.setFloat(f++, feedback.zoom);
     shader.setFloat(f++, feedback.rotation);
     shader.setFloat(f++, feedback.decay);

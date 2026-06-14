@@ -13,30 +13,21 @@ uniform float u_stereo;      // 8
 uniform float u_bass_left;   // 9
 uniform float u_bass_right;  // 10
 
-// ── DNA ────────────────────────────────────────────────────
-uniform float u_dna_zoom;        // 11
-uniform float u_dna_rotation;    // 12
-uniform float u_dna_warp_x;      // 13
-uniform float u_dna_warp_y;      // 14
-uniform float u_dna_wave_freq;   // 15
-uniform float u_dna_color_speed; // 16
-uniform float u_dna_spokes;      // 17
-uniform float u_dna_bass_react;  // 18
-uniform float u_dna_mid_react;   // 19
-uniform float u_dna_phase;       // 20
+// ── Seed ───────────────────────────────────────────────────
+uniform float u_seed;        // 11 → DNA wird im Shader abgeleitet
 
 // ── Palette (4 Stops × RGB) ────────────────────────────────
-uniform vec3 u_pal_shadow;    // 21–23
-uniform vec3 u_pal_low;       // 24–26
-uniform vec3 u_pal_high;      // 27–29
-uniform vec3 u_pal_highlight; // 30–32
+uniform vec3 u_pal_shadow;    // 12–14
+uniform vec3 u_pal_low;       // 15–17
+uniform vec3 u_pal_high;      // 18–20
+uniform vec3 u_pal_highlight; // 21–23
 
 // ── Feedback ───────────────────────────────────────────────
-uniform float u_fb_zoom;      // 33
-uniform float u_fb_rotation;  // 34
-uniform float u_fb_decay;     // 35
-uniform float u_fb_warp_x;    // 36
-uniform float u_fb_warp_y;    // 37
+uniform float u_fb_zoom;      // 24
+uniform float u_fb_rotation;  // 25
+uniform float u_fb_decay;     // 26
+uniform float u_fb_warp_x;    // 27
+uniform float u_fb_warp_y;    // 28
 
 // ── Prev Frame Texture (Milkdrop Feedback) ─────────────────
 uniform sampler2D u_prev_frame; // sampler 0
@@ -59,45 +50,61 @@ float neon_glow(float x, float thickness) {
 // ── 2D Rotation ────────────────────────────────────────────
 vec2 rot2(float a) {
     float c = cos(a), s = sin(a);
-    return vec2(c, -s); // used as: rotated = vec2(dot(v, rot2(a)), dot(v, rot2(a + 1.5708)))
+    return vec2(c, -s);
 }
 
-// ── Tunnel-Grid für einen Farbkanal ───────────────────────
-float get_tunnel_lines(vec2 uv, float z_offset, float beat_phase) {
+// Deterministischer 1D-Hash aus Seed + Salt
+float hash_seed(float seed, float salt) {
+    return fract(sin(seed * 12.9898 + salt * 78.233) * 43758.5453);
+}
+
+float get_tunnel_lines(vec2 uv, float z_offset, float beat_phase,
+                       float d_zoom, float d_rotation, float d_warp_x,
+                       float d_warp_y, float d_wave_freq, float d_bass_react,
+                       float d_mid_react) {
     float radius = length(uv);
-    radius -= u_bass * 0.2 * u_dna_bass_react;
+    radius -= u_bass * 0.2 * d_bass_react;
     radius  = max(radius, 0.001);
 
     float angle = atan(uv.y, uv.x);
-    angle += u_time * (u_dna_rotation * 0.5) + u_mid * 0.8 * u_dna_mid_react;
+    angle += u_time * (d_rotation * 0.5) + u_mid * 0.8 * d_mid_react;
 
     float z     = 1.0 / radius;
-    float z_spd = u_time * (1.0 + u_dna_zoom + u_energy * 4.0) + z_offset;
+    float z_spd = u_time * (1.0 + d_zoom + u_energy * 4.0) + z_offset;
     vec2  tuv   = vec2(angle * 2.0 / 3.14159, z + z_spd);
 
     vec2  grid      = fract(tuv) - 0.5;
-    float thickness = 0.015 + u_high * 0.06 * u_dna_bass_react;
+    float thickness = 0.015 + u_high * 0.06 * d_bass_react;
     return neon_glow(grid.x, thickness) + neon_glow(grid.y, thickness);
 }
 
 void main() {
+    // ── DNA aus Seed ableiten ──────────────────────────────
+    float d_zoom       = 0.7 + hash_seed(u_seed, 1.0) * 0.7;
+    float d_rotation   = (0.4 + hash_seed(u_seed, 2.0) * 1.6)
+                       * (hash_seed(u_seed, 3.0) > 0.5 ? 1.0 : -1.0);
+    float d_warp_x     = (hash_seed(u_seed, 4.0) - 0.5) * 1.2;
+    float d_warp_y     = (hash_seed(u_seed, 5.0) - 0.5) * 1.2;
+    float d_wave_freq  = 1.0 + hash_seed(u_seed, 6.0) * 7.0;
+    float d_color_speed= 0.2 + hash_seed(u_seed, 7.0) * 2.3;
+    float d_spokes     = floor(2.0 + hash_seed(u_seed, 8.0) * 8.5);
+    float d_bass_react = 0.3 + hash_seed(u_seed, 9.0) * 0.7;
+    float d_mid_react  = 0.3 + hash_seed(u_seed, 10.0) * 0.7;
+    float d_phase      = hash_seed(u_seed, 11.0) * 6.28318;
+
     vec2 uv_raw = FlutterFragCoord().xy / vec2(u_width, u_height);
     vec2 uv     = uv_raw * 2.0 - 1.0;
     uv.x       *= u_width / u_height;
     vec2 uv0    = uv;
 
     // ── Milkdrop Feedback Pass ─────────────────────────────
-    // Vorheriges Frame als Textur: Zoom + Rotation + Warp + Decay
     vec2 fb = uv_raw - 0.5;
     fb /= u_fb_zoom;
-    // Rotation des Feedback-Buffers
     float co = cos(-u_fb_rotation), si = sin(-u_fb_rotation);
     fb = vec2(fb.x * co - fb.y * si, fb.x * si + fb.y * co);
-    // Milkdrop-Vertex-Warp: Sinuswellen-Verzerrung des Samplings
     fb.x += sin(fb.y * 8.0 + u_time * 0.7) * u_fb_warp_x;
     fb.y += cos(fb.x * 8.0 - u_time * 0.5) * u_fb_warp_y;
     vec2 fb_uv = fb + 0.5;
-    // Sanfter Edge-Fade — kein harter Rand
     vec2 ef   = smoothstep(vec2(0.0), vec2(0.04), fb_uv)
               * (vec2(1.0) - smoothstep(vec2(0.96), vec2(1.0), fb_uv));
     vec3 feedback = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb
@@ -109,25 +116,31 @@ void main() {
     float beat_kick  = exp(-beat_phase * 9.0);
 
     // ── Camera Shake auf Beat ──────────────────────────────
-    float shake = exp(-beat_phase * 5.0) * u_energy * 0.05 * u_dna_bass_react;
+    float shake = exp(-beat_phase * 5.0) * u_energy * 0.05 * d_bass_react;
     uv.x += (fract(sin(u_time * 112.3) * 43758.545) - 0.5) * shake;
     uv.y += (fract(cos(u_time *  73.1) * 43758.545) - 0.5) * shake;
 
     // ── DNA Warp ───────────────────────────────────────────
     float warp_boost = 1.0 + u_energy * 3.0;
-    uv.x += sin(uv.y * u_dna_wave_freq + u_time * 0.5) * u_dna_warp_x * warp_boost;
-    uv.y += cos(uv.x * u_dna_wave_freq - u_time * 0.5) * u_dna_warp_y * warp_boost;
+    uv.x += sin(uv.y * d_wave_freq + u_time * 0.5) * d_warp_x * warp_boost;
+    uv.y += cos(uv.x * d_wave_freq - u_time * 0.5) * d_warp_y * warp_boost;
 
     // ── Chromatische Aberration: RGB-Split ─────────────────
     float rgb_split = u_bass * 0.06 + u_energy * 0.02;
-    float lines_r   = get_tunnel_lines(uv * (1.0 - rgb_split), 0.00, beat_phase);
-    float lines_g   = get_tunnel_lines(uv,                      0.05, beat_phase);
-    float lines_b   = get_tunnel_lines(uv * (1.0 + rgb_split), 0.10, beat_phase);
+    float lines_r   = get_tunnel_lines(uv * (1.0 - rgb_split), 0.00, beat_phase,
+                                       d_zoom, d_rotation, d_warp_x, d_warp_y,
+                                       d_wave_freq, d_bass_react, d_mid_react);
+    float lines_g   = get_tunnel_lines(uv,                      0.05, beat_phase,
+                                       d_zoom, d_rotation, d_warp_x, d_warp_y,
+                                       d_wave_freq, d_bass_react, d_mid_react);
+    float lines_b   = get_tunnel_lines(uv * (1.0 + rgb_split), 0.10, beat_phase,
+                                       d_zoom, d_rotation, d_warp_x, d_warp_y,
+                                       d_wave_freq, d_bass_react, d_mid_react);
 
     // ── Farbe ──────────────────────────────────────────────
-    float hue_shift = u_time * 0.04 * u_dna_color_speed + u_dna_phase / 6.28318;
+    float hue_shift = u_time * 0.04 * d_color_speed + d_phase / 6.28318;
     vec3  col_base  = pal(fract(hue_shift));
-    vec3  col_bass  = u_pal_highlight * u_bass * u_dna_bass_react;
+    vec3  col_bass  = u_pal_highlight * u_bass * d_bass_react;
     vec3  grid_col  = col_base + col_bass;
 
     vec3 new_content = vec3(
