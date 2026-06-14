@@ -189,8 +189,8 @@ void main() {
 
         for (int i = 0; i < 10; i++) {
             // Sanfter Fade-Out statt hartem Cut
-            float active = clamp(n_float - float(i), 0.0, 1.0);
-            if (active == 0.0) continue;
+            float isActive = clamp(n_float - float(i), 0.0, 1.0);
+            if (isActive == 0.0) continue;
 
             float fi  = float(i);
             vec2  h   = hash21(vec2(fi * 13.7, fi * 7.31) + u_dna_phase * 0.002);
@@ -230,7 +230,7 @@ void main() {
 
             // ── Beitrag zu diesem Pixel ──────────────────────
             vec2 delta = uv - pos;
-            float g    = particle_glow(delta, glow_r, n_pts, zoom_t) * 4.0 * active;
+            float g    = particle_glow(delta, glow_r, n_pts, zoom_t) * 4.0 * isActive;
 
             // Farbe: jeder Hero bekommt eigene Palettenfarbe
             float hue_i = fi / n_float + u_time * 0.05 * u_dna_color_speed
