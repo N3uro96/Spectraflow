@@ -1,52 +1,33 @@
 import 'package:flutter/services.dart';
 
 class NativeBridge {
-  static const _channel = MethodChannel('com.spectraflow.app/engine');
+  static const _ch = MethodChannel('com.spectraflow.app/engine');
 
   static Future<bool> init() async {
-    try {
-      return await _channel.invokeMethod('init') ?? false;
-    } catch (e) {
-      return false;
-    }
+    try { return await _ch.invokeMethod('init') ?? false; }
+    catch (_) { return false; }
   }
 
   static Future<bool> startMicrophone() async {
-    try {
-      return await _channel.invokeMethod('startMicrophone') ?? false;
-    } catch (e) {
-      return false;
-    }
+    try { return await _ch.invokeMethod('startMicrophone') ?? false; }
+    catch (_) { return false; }
   }
 
   static Future<bool> startFilePlayback(String path) async {
-    try {
-      return await _channel.invokeMethod('startFilePlayback', {'path': path}) ?? false;
-    } catch (e) {
-      return false;
-    }
+    try { return await _ch.invokeMethod('startFilePlayback', {'path': path}) ?? false; }
+    catch (_) { return false; }
   }
 
   static Future<void> stop() async {
-    try {
-      await _channel.invokeMethod('stop');
-    } catch (e) {}
+    try { await _ch.invokeMethod('stop'); } catch (_) {}
   }
 
-  static Future<double> getBpm() async {
+  // EIN Call – gibt alles zurück
+  static Future<List<double>> getAllData() async {
     try {
-      return await _channel.invokeMethod('getBpm') ?? 120.0;
-    } catch (e) {
-      return 120.0;
-    }
-  }
-
-  static Future<List<double>> getFFTData() async {
-    try {
-      final data = await _channel.invokeMethod('getFFTData');
-      return List<double>.from(data ?? []);
-    } catch (e) {
-      return [];
-    }
+      final data = await _ch.invokeMethod('getAllData');
+      if (data == null) return [];
+      return List<double>.from(data);
+    } catch (_) { return []; }
   }
 }

@@ -1,11 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'native_bridge.dart';
-import 'texture_manager.dart';
 
 class AudioDataProvider extends ChangeNotifier {
-  final TextureManager textures = TextureManager();
-
   List<double> envLeft  = List.filled(32, 0.0);
   List<double> envRight = List.filled(32, 0.0);
   List<double> fftMid   = List.filled(32, 0.0);
@@ -14,52 +11,44 @@ class AudioDataProvider extends ChangeNotifier {
   double bpm         = 120.0;
   double energy      = 0.0;
   double stereoWidth = 0.0;
-  double beatPhase   = 0.0;
   double bassLeft    = 0.0;
   double bassRight   = 0.0;
   double midLeft     = 0.0;
   double highLeft    = 0.0;
+  double beatPhase   = 0.0;
 
-  Timer? _scalarTimer;   // 60fps – nur skalare Werte
-  Timer? _textureTimer;  // 20fps – Texturen (wenn gebraucht)
-  bool   _textureMode = false;
+  Timer? _timer;
+  bool   _busy = false;
 
-  void start({bool withTextures = false}) {
-    _textureMode = withTextures;
-
-    // Skalare Werte – 60fps, kein Blocking
-    _scalarTimer = Timer.periodic(
-      const Duration(milliseconds: 16),
-      (_) => _pollScalars(),
+  void start() {
+    // 30fps – verhindert Aufstauen
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 33),
+      (_) => _poll(),
     );
-
-    // Texturen – 20fps, im Hintergrund
-    if (withTextures) {
-      _textureTimer = Timer.periodic(
-        const Duration(milliseconds: 50),
-        (_) => _pollTextures(),
-      );
-    }
   }
 
   void stop() {
-    _scalarTimer?.cancel();
-    _textureTimer?.cancel();
-    _scalarTimer  = null;
-    _textureTimer = null;
+    _timer?.cancel();
+    _timer = null;
   }
 
-  // ─── Schnell: nur skalare Werte ───
-  Future<void> _pollScalars() async {
-    try {
-      final data = await NativeBridge.getFFTData();
-      if (data.length < 192) return;
+  Future<void> _poll() async {
+    // Busy flag – verhindert überlappende Calls
+    if (_busy) return;
+    _busy = true;
 
+    try {
+      final data = await NativeBridge.getAllData();
+      if (data.length < 195) { _busy = false; return; }
+
+      // FFT Daten
       envLeft  = data.sublist(128, 160);
       envRight = data.sublist(160, 192);
       fftMid   = data.sublist(64,  96);
       fftSide  = data.sublist(96,  128);
 
+      // Aggregierte Werte
       bassLeft  = (envLeft[0]  + envLeft[1]  + envLeft[2]  + envLeft[3])  / 4.0;
       bassRight = (envRight[0] + envRight[1] + envRight[2] + envRight[3]) / 4.0;
       midLeft   = (envLeft[8]  + envLeft[9]  + envLeft[10] + envLeft[11]) / 4.0;
@@ -70,43 +59,21 @@ class AudioDataProvider extends ChangeNotifier {
       final midSum  = fftMid.fold(0.0,  (a, b) => a + b);
       stereoWidth   = midSum > 0.001 ? (sideSum / midSum).clamp(0.0, 1.0) : 0.0;
 
-      bpm = await NativeBridge.getBpm();
+      // BPM + Energie + Stereo vom JNI
+      bpm    = data[192].clamp(60.0, 200.0);
+      energy = data[193].clamp(0.0, 1.0);
 
       notifyListeners();
     } catch (e) {
-      debugPrint('Scalar poll error: $e');
+      debugPrint('Poll error: $e');
+    } finally {
+      _busy = false;
     }
-  }
-
-  // ─── Langsam: Texturen im Double-Buffer ───
-  Future<void> _pollTextures() async {
-    try {
-      await textures.update(
-        left:  envLeft,
-        right: envRight,
-        mid:   fftMid,
-        side:  fftSide,
-      );
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Texture poll error: $e');
-    }
-  }
-
-  // Texturen nachträglich aktivieren
-  void enableTextures() {
-    if (_textureMode) return;
-    _textureMode  = true;
-    _textureTimer = Timer.periodic(
-      const Duration(milliseconds: 50),
-      (_) => _pollTextures(),
-    );
   }
 
   @override
   void dispose() {
     stop();
-    textures.dispose();
     super.dispose();
   }
 }

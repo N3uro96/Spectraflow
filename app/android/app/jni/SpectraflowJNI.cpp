@@ -18,28 +18,20 @@
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// ─────────────────────────────────────────
-// File Player – Pull-basiert (kein eigener Thread)
-// Oboe ruft onAudioReady auf → liest direkt aus PCM Buffer
-// ─────────────────────────────────────────
 class FilePlaybackCallback : public oboe::AudioStreamDataCallback {
 public:
-    std::vector<float> pcm_left;
-    std::vector<float> pcm_right;
+    std::vector<float>  pcm_left;
+    std::vector<float>  pcm_right;
     std::atomic<size_t> read_pos{0};
     std::atomic<bool>   playing{false};
 
-    // Pre-allocated Analysis Buffer (kein malloc im Audio Thread)
-    static constexpr size_t ANALYSIS_SIZE = 2048;
-    float analysis_left[ANALYSIS_SIZE]  {};
-    float analysis_right[ANALYSIS_SIZE] {};
-    size_t analysis_pos = 0;
+    static constexpr size_t CHUNK = 2048;
+    float buf_l[CHUNK]{};
+    float buf_r[CHUNK]{};
+    size_t buf_pos = 0;
 
     bool load(const std::string& path) {
-        pcm_left.clear();
-        pcm_right.clear();
-        read_pos = 0;
-
+        pcm_left.clear(); pcm_right.clear(); read_pos = 0;
         std::string ext = path.substr(path.find_last_of('.') + 1);
         for (auto& c : ext) c = std::tolower(c);
 
@@ -52,80 +44,61 @@ public:
             drmp3_read_pcm_frames_f32(&mp3, frames, buf.data());
             drmp3_uninit(&mp3);
             _split(buf, frames, ch);
-        }
-        else if (ext == "wav") {
+        } else if (ext == "wav") {
             drwav wav;
             if (!drwav_init_file(&wav, path.c_str(), nullptr)) return false;
-            int ch = wav.channels;
-            size_t frames = wav.totalPCMFrameCount;
+            int ch = wav.channels; size_t frames = wav.totalPCMFrameCount;
             std::vector<float> buf(frames * ch);
             drwav_read_pcm_frames_f32(&wav, frames, buf.data());
             drwav_uninit(&wav);
             _split(buf, frames, ch);
-        }
-        else if (ext == "flac") {
+        } else if (ext == "flac") {
             drflac* flac = drflac_open_file(path.c_str(), nullptr);
             if (!flac) return false;
-            int ch = flac->channels;
-            size_t frames = flac->totalPCMFrameCount;
+            int ch = flac->channels; size_t frames = flac->totalPCMFrameCount;
             std::vector<float> buf(frames * ch);
             drflac_read_pcm_frames_f32(flac, frames, buf.data());
             drflac_close(flac);
             _split(buf, frames, ch);
-        }
-        else {
-            LOGE("Unsupported format: %s", ext.c_str());
-            return false;
-        }
+        } else { LOGE("Unsupported: %s", ext.c_str()); return false; }
 
         LOGI("Loaded %zu frames", pcm_left.size());
         return !pcm_left.empty();
     }
 
-    // Oboe Pull-Callback – kein alloc, kein sleep
     oboe::DataCallbackResult onAudioReady(
         oboe::AudioStream* stream, void* data, int32_t numFrames) override
     {
-        auto* out = static_cast<float*>(data);
-        int   ch  = stream->getChannelCount();
+        auto*  out   = static_cast<float*>(data);
+        int    ch    = stream->getChannelCount();
         size_t pos   = read_pos.load(std::memory_order_relaxed);
         size_t total = pcm_left.size();
 
         for (int i = 0; i < numFrames; i++) {
             float l = 0.0f, r = 0.0f;
             if (playing.load() && pos < total) {
-                l = pcm_left[pos];
-                r = pcm_right[pos];
-                pos++;
+                l = pcm_left[pos]; r = pcm_right[pos]; pos++;
             }
             if (ch >= 2) { out[i*2] = l; out[i*2+1] = r; }
             else           out[i]   = (l + r) * 0.5f;
 
-            // FFT Analyse Buffer füllen
-            analysis_left[analysis_pos]  = l;
-            analysis_right[analysis_pos] = r;
-            analysis_pos++;
-
-            if (analysis_pos >= ANALYSIS_SIZE) {
-                sf_feed_audio(analysis_left, analysis_right, ANALYSIS_SIZE);
-                analysis_pos = 0;
+            buf_l[buf_pos] = l;
+            buf_r[buf_pos] = r;
+            buf_pos++;
+            if (buf_pos >= CHUNK) {
+                sf_feed_audio(buf_l, buf_r, (int)CHUNK);
+                buf_pos = 0;
             }
         }
-
         read_pos.store(pos, std::memory_order_relaxed);
-
-        // Loop
-        if (pos >= total && playing.load()) {
+        if (pos >= total && playing.load())
             read_pos.store(0, std::memory_order_relaxed);
-        }
-
         return oboe::DataCallbackResult::Continue;
     }
 
 private:
     void _split(const std::vector<float>& buf, size_t frames, int ch) {
-        pcm_left.resize(frames);
-        pcm_right.resize(frames);
+        pcm_left.resize(frames); pcm_right.resize(frames);
         for (size_t i = 0; i < frames; i++) {
             pcm_left[i]  = buf[i * ch];
             pcm_right[i] = (ch > 1) ? buf[i * ch + 1] : buf[i * ch];
@@ -133,41 +106,29 @@ private:
     }
 };
 
-// ─────────────────────────────────────────
-// Mikrofon Callback
-// ─────────────────────────────────────────
 class MicCallback : public oboe::AudioStreamDataCallback {
     static constexpr size_t CHUNK = 2048;
     float buf_l[CHUNK]{}, buf_r[CHUNK]{};
     size_t pos = 0;
-
 public:
     oboe::DataCallbackResult onAudioReady(
         oboe::AudioStream* stream, void* data, int32_t frames) override
     {
-        auto* f  = static_cast<float*>(data);
+        auto* f = static_cast<float*>(data);
         int   ch = stream->getChannelCount();
-
         for (int i = 0; i < frames; i++) {
             buf_l[pos] = (ch >= 2) ? f[i*2]   : f[i];
             buf_r[pos] = (ch >= 2) ? f[i*2+1] : f[i];
-            pos++;
-            if (pos >= CHUNK) {
-                sf_feed_audio(buf_l, buf_r, CHUNK);
-                pos = 0;
-            }
+            if (++pos >= CHUNK) { sf_feed_audio(buf_l, buf_r, (int)CHUNK); pos = 0; }
         }
         return oboe::DataCallbackResult::Continue;
     }
 };
 
-// ─────────────────────────────────────────
-// Globale Instanzen
-// ─────────────────────────────────────────
-static std::shared_ptr<oboe::AudioStream>       g_input_stream;
-static std::shared_ptr<oboe::AudioStream>       g_output_stream;
-static std::unique_ptr<MicCallback>             g_mic_cb;
-static std::unique_ptr<FilePlaybackCallback>    g_file_cb;
+static std::shared_ptr<oboe::AudioStream>    g_input_stream;
+static std::shared_ptr<oboe::AudioStream>    g_output_stream;
+static std::unique_ptr<MicCallback>          g_mic_cb;
+static std::unique_ptr<FilePlaybackCallback> g_file_cb;
 
 static void stop_streams() {
     if (g_input_stream)  { g_input_stream->stop();  g_input_stream->close();  g_input_stream.reset(); }
@@ -189,7 +150,6 @@ Java_com_spectraflow_app_SpectraflowEngine_nativeStartMicrophone(JNIEnv*, jobjec
 {
     stop_streams();
     g_mic_cb = std::make_unique<MicCallback>();
-
     oboe::AudioStreamBuilder b;
     b.setDirection(oboe::Direction::Input)
      ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
@@ -198,10 +158,9 @@ Java_com_spectraflow_app_SpectraflowEngine_nativeStartMicrophone(JNIEnv*, jobjec
      ->setChannelCount(oboe::ChannelCount::Stereo)
      ->setSampleRate(44100)
      ->setDataCallback(g_mic_cb.get());
-
     auto r = b.openStream(g_input_stream);
     if (r != oboe::Result::OK) { LOGE("Mic open: %s", oboe::convertToText(r)); return JNI_FALSE; }
-    sf_set_sample_rate(g_input_stream->getSampleRate());
+    sf_set_sample_rate((float)g_input_stream->getSampleRate());
     r = g_input_stream->start();
     if (r != oboe::Result::OK) { LOGE("Mic start: %s", oboe::convertToText(r)); return JNI_FALSE; }
     LOGI("Mic started %d Hz", g_input_stream->getSampleRate());
@@ -213,16 +172,12 @@ Java_com_spectraflow_app_SpectraflowEngine_nativeStartFilePlayback(
     JNIEnv* env, jobject, jstring jpath)
 {
     stop_streams();
-
     const char* path = env->GetStringUTFChars(jpath, nullptr);
-    std::string file_path(path);
+    std::string fp(path);
     env->ReleaseStringUTFChars(jpath, path);
 
     g_file_cb = std::make_unique<FilePlaybackCallback>();
-    if (!g_file_cb->load(file_path)) {
-        LOGE("Failed to load: %s", file_path.c_str());
-        return JNI_FALSE;
-    }
+    if (!g_file_cb->load(fp)) { LOGE("Load failed: %s", fp.c_str()); return JNI_FALSE; }
 
     oboe::AudioStreamBuilder b;
     b.setDirection(oboe::Direction::Output)
@@ -232,15 +187,13 @@ Java_com_spectraflow_app_SpectraflowEngine_nativeStartFilePlayback(
      ->setChannelCount(oboe::ChannelCount::Stereo)
      ->setSampleRate(44100)
      ->setDataCallback(g_file_cb.get());
-
     auto r = b.openStream(g_output_stream);
     if (r != oboe::Result::OK) { LOGE("Output open: %s", oboe::convertToText(r)); return JNI_FALSE; }
-    sf_set_sample_rate(g_output_stream->getSampleRate());
+    sf_set_sample_rate((float)g_output_stream->getSampleRate());
     r = g_output_stream->start();
     if (r != oboe::Result::OK) { LOGE("Output start: %s", oboe::convertToText(r)); return JNI_FALSE; }
-
     g_file_cb->playing.store(true);
-    LOGI("File playback started: %s", file_path.c_str());
+    LOGI("File started: %s", fp.c_str());
     return JNI_TRUE;
 }
 
@@ -251,26 +204,18 @@ Java_com_spectraflow_app_SpectraflowEngine_nativeStop(JNIEnv*, jobject)
     stop_streams();
 }
 
-JNIEXPORT jfloat JNICALL
-Java_com_spectraflow_app_SpectraflowEngine_nativeGetBpm(JNIEnv*, jobject)
-{ return sf_get_bpm(); }
-
-JNIEXPORT jfloat JNICALL
-Java_com_spectraflow_app_SpectraflowEngine_nativeGetEnergy(JNIEnv*, jobject)
-{ return sf_get_energy(); }
-
-JNIEXPORT jfloat JNICALL
-Java_com_spectraflow_app_SpectraflowEngine_nativeGetStereoWidth(JNIEnv*, jobject)
-{ return sf_get_stereo_width(); }
-
+// ─── EIN kombinierter Call: FFT + BPM + Energie + Stereo ───
+// 192 FFT Werte + 3 Skalare = 195 floats total
 JNIEXPORT jfloatArray JNICALL
-Java_com_spectraflow_app_SpectraflowEngine_nativeGetFFTData(JNIEnv* env, jobject)
+Java_com_spectraflow_app_SpectraflowEngine_nativeGetAllData(JNIEnv* env, jobject)
 {
     SF_AudioData data{};
     if (!sf_get_audio_data(&data)) return nullptr;
-    jfloatArray result = env->NewFloatArray(192);
+
+    jfloatArray result = env->NewFloatArray(195);
     if (!result) return nullptr;
-    float combined[192];
+
+    float combined[195];
     for (int i = 0; i < 32; i++) {
         combined[i +   0] = data.fft_left[i];
         combined[i +  32] = data.fft_right[i];
@@ -279,7 +224,11 @@ Java_com_spectraflow_app_SpectraflowEngine_nativeGetFFTData(JNIEnv* env, jobject
         combined[i + 128] = data.env_left[i];
         combined[i + 160] = data.env_right[i];
     }
-    env->SetFloatArrayRegion(result, 0, 192, combined);
+    combined[192] = sf_get_bpm();
+    combined[193] = sf_get_energy();
+    combined[194] = sf_get_stereo_width();
+
+    env->SetFloatArrayRegion(result, 0, 195, combined);
     return result;
 }
 
