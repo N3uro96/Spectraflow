@@ -1,6 +1,7 @@
 #pragma once
 #include <atomic>
 #include <array>
+#include <cstddef>
 
 // Lock-free Single Producer Single Consumer Ring Buffer
 template<typename T, size_t SIZE>
@@ -29,7 +30,7 @@ public:
         return true;
     }
 
-    // Neuestes Element ohne pop (Render Thread liest immer letzten Stand)
+    // Neuestes Element ohne pop
     bool peek_latest(T& item) {
         size_t head = head_.load(std::memory_order_acquire);
         size_t tail = tail_.load(std::memory_order_relaxed);
