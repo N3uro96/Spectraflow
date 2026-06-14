@@ -2,7 +2,6 @@ name: spectraflow
 description: Intelligent Audio Visualizer
 
 publish_to: 'none'
-
 version: 0.1.0+1
 
 environment:
@@ -24,3 +23,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  shaders:
+    - lib/shaders/tunnel_composite.frag

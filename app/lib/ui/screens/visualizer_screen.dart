@@ -5,29 +5,24 @@ import '../../core/audio_manager.dart';
 import '../../core/audio_data_provider.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
-import '../widgets/shader_canvas.dart';
+import '../widgets/visualizer_widget.dart';
 
 class VisualizerScreen extends StatelessWidget {
   const VisualizerScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Nur AudioManager – ändert sich selten
-    final audio = context.watch<AudioManager>();
-    // AudioDataProvider nur via context.read – KEIN watch!
+    final audio     = context.watch<AudioManager>();
     final audioData = context.read<AudioDataProvider>();
 
     return Scaffold(
       backgroundColor: SFTheme.background,
       body: Stack(
         children: [
-          // Canvas – hat eigenen Repaint Listener
-          Positioned.fill(child: ShaderCanvas(audioData: audioData)),
-
+          Positioned.fill(child: VisualizerWidget(audioData: audioData)),
           SafeArea(
             child: Column(
               children: [
-                // Nur BPM/Stereo Werte brauchen Audio Updates
                 _TopBar(audioData: audioData),
                 const Spacer(),
                 if (audio.fileName != null) _NowPlaying(audio: audio),
@@ -41,9 +36,6 @@ class VisualizerScreen extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────
-// Top Bar – eigener ListenableBuilder
-// ─────────────────────────────────────────
 class _TopBar extends StatelessWidget {
   final AudioDataProvider audioData;
   const _TopBar({required this.audioData});
@@ -58,34 +50,31 @@ class _TopBar extends StatelessWidget {
             style: SFTheme.labelSmall.copyWith(
               letterSpacing: 3.0, color: SFTheme.textPrimary)),
           const Spacer(),
-          // Nur diese zwei Werte updaten sich
           ListenableBuilder(
             listenable: audioData,
-            builder: (_, __) => Row(
-              children: [
-                GlassContainer(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  borderRadius: SFTheme.radiusSm,
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text('${audioData.bpm.toStringAsFixed(0)}',
-                        style: SFTheme.titleMedium),
-                    const SizedBox(width: 4),
-                    Text('BPM', style: SFTheme.labelSmall),
-                  ]),
-                ),
-                const SizedBox(width: 10),
-                GlassContainer(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  borderRadius: SFTheme.radiusSm,
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text('${(audioData.stereoWidth * 100).toStringAsFixed(0)}%',
-                        style: SFTheme.titleMedium),
-                    const SizedBox(width: 4),
-                    Text('STEREO', style: SFTheme.labelSmall),
-                  ]),
-                ),
-              ],
-            ),
+            builder: (_, __) => Row(children: [
+              GlassContainer(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                borderRadius: SFTheme.radiusSm,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('${audioData.bpm.toStringAsFixed(0)}',
+                      style: SFTheme.titleMedium),
+                  const SizedBox(width: 4),
+                  Text('BPM', style: SFTheme.labelSmall),
+                ]),
+              ),
+              const SizedBox(width: 10),
+              GlassContainer(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                borderRadius: SFTheme.radiusSm,
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text('${(audioData.stereoWidth * 100).toStringAsFixed(0)}%',
+                      style: SFTheme.titleMedium),
+                  const SizedBox(width: 4),
+                  Text('STEREO', style: SFTheme.labelSmall),
+                ]),
+              ),
+            ]),
           ),
         ],
       ),
@@ -93,9 +82,6 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// ─────────────────────────────────────────
-// Now Playing – statisch, ändert sich selten
-// ─────────────────────────────────────────
 class _NowPlaying extends StatelessWidget {
   final AudioManager audio;
   const _NowPlaying({required this.audio});
@@ -107,37 +93,30 @@ class _NowPlaying extends StatelessWidget {
       child: GlassContainer(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         borderRadius: SFTheme.radiusSm,
-        child: Row(
-          children: [
-            Icon(
+        child: Row(children: [
+          Icon(
+            audio.source == AudioSource.microphone
+                ? Icons.mic_rounded : Icons.music_note_rounded,
+            color: SFTheme.textPrimary, size: 16),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
               audio.source == AudioSource.microphone
-                  ? Icons.mic_rounded : Icons.music_note_rounded,
-              color: SFTheme.textPrimary, size: 16,
+                  ? 'MICROPHONE INPUT' : audio.fileName ?? '',
+              style: SFTheme.bodyMedium.copyWith(color: SFTheme.textPrimary),
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                audio.source == AudioSource.microphone
-                    ? 'MICROPHONE INPUT' : audio.fileName ?? '',
-                style: SFTheme.bodyMedium.copyWith(color: SFTheme.textPrimary),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            GestureDetector(
-              onTap: audio.stop,
-              child: Icon(Icons.close_rounded,
-                  color: SFTheme.textSecondary, size: 16),
-            ),
-          ],
-        ),
+          ),
+          GestureDetector(
+            onTap: audio.stop,
+            child: Icon(Icons.close_rounded,
+                color: SFTheme.textSecondary, size: 16)),
+        ]),
       ),
     ).animate().fadeIn(duration: 300.ms);
   }
 }
 
-// ─────────────────────────────────────────
-// Bottom Panel – statisch, keine Audio Updates
-// ─────────────────────────────────────────
 class _BottomPanel extends StatefulWidget {
   final AudioManager audio;
   const _BottomPanel({required this.audio});
@@ -147,19 +126,26 @@ class _BottomPanel extends StatefulWidget {
 }
 
 class _BottomPanelState extends State<_BottomPanel> {
-  int _shaderIndex  = 0;
   int _paletteIndex = 0;
 
   final List<String> _shaderNames = [
-    'NEBULA', 'VORTEX', 'FRACTAL', 'PLASMA',
-    'CRYSTAL', 'AURORA', 'WARP', 'PRISM',
+    'TUNNEL', 'KALEIDOSKOP', 'PLASMA', 'SCHACHBRETT',
+    'FRAKTAL', 'RAYMARCHING', 'FLUID', 'ATTRACTOR',
   ];
+
+  int _shaderIndex = 0;
 
   final List<Color> _paletteColors = [
     const Color(0xFF6C63FF), const Color(0xFFFF6584),
     const Color(0xFF43E97B), const Color(0xFFFA8231),
     const Color(0xFF00D2FF), const Color(0xFFFFD700),
   ];
+
+  void _nextShader() {
+    setState(() {
+      _shaderIndex = (_shaderIndex + 1) % _shaderNames.length;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +157,34 @@ class _BottomPanelState extends State<_BottomPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _buildShaderSelector(),
+            // Shader Name + Next Button
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('SHADER', style: SFTheme.labelSmall),
+                GestureDetector(
+                  onTap: _nextShader,
+                  child: GlassContainer(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    borderRadius: SFTheme.radiusSm,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _shaderNames[_shaderIndex],
+                          style: SFTheme.labelSmall.copyWith(
+                              color: SFTheme.textPrimary),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(Icons.arrow_forward_ios_rounded,
+                            color: SFTheme.textPrimary, size: 12),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 20),
             _buildPaletteSelector(),
             const SizedBox(height: 24),
@@ -182,47 +195,6 @@ class _BottomPanelState extends State<_BottomPanel> {
     ).animate()
       .slideY(begin: 0.3, end: 0, duration: 600.ms, curve: Curves.easeOutCubic)
       .fadeIn(duration: 600.ms);
-  }
-
-  Widget _buildShaderSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('SHADER', style: SFTheme.labelSmall),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 36,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: _shaderNames.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 8),
-            itemBuilder: (context, index) {
-              final selected = index == _shaderIndex;
-              return GestureDetector(
-                onTap: () => setState(() => _shaderIndex = index),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: selected ? SFTheme.glassAccent : Colors.transparent,
-                    borderRadius: BorderRadius.circular(SFTheme.radiusSm),
-                    border: Border.all(
-                      color: selected ? SFTheme.glassBorder : Colors.transparent,
-                      width: 0.5,
-                    ),
-                  ),
-                  child: Text(_shaderNames[index],
-                    style: SFTheme.labelSmall.copyWith(
-                      color: selected ? SFTheme.textPrimary : SFTheme.textSecondary,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
   }
 
   Widget _buildPaletteSelector() {
@@ -250,12 +222,10 @@ class _BottomPanelState extends State<_BottomPanel> {
                         : Colors.transparent,
                     width: 2,
                   ),
-                  boxShadow: selected ? [
-                    BoxShadow(
-                      color: _paletteColors[index].withOpacity(0.6),
-                      blurRadius: 12, spreadRadius: 2,
-                    )
-                  ] : null,
+                  boxShadow: selected ? [BoxShadow(
+                    color: _paletteColors[index].withOpacity(0.6),
+                    blurRadius: 12, spreadRadius: 2,
+                  )] : null,
                 ),
               ),
             );
