@@ -30,7 +30,6 @@ uniform float u_fb_warp_x;    // 27
 uniform float u_fb_warp_y;    // 28
 
 uniform sampler2D u_prev_frame; // sampler 0
-uniform sampler2D u_fft_texture; // sampler 1 — 1D FFT-Daten (optional)
 
 out vec4 fragColor;
 
@@ -49,15 +48,6 @@ float hash_seed(float seed, float salt) {
   return fract(sin(seed * 12.9898 + salt * 78.233) * 43758.5453);
 }
 
-// Hilfsfunktion: Lese FFT-Band (1D-Textur, Koordinate = Frequenzband 0..1)
-float fft_band(float x) {
-  return texture(u_fft_texture, vec2(clamp(x, 0.0, 1.0), 0.5)).r;
-}
-
-// Hilfsfunktion: Stereo-geteiltes FFT
-float fft_stereo(float base, float spread, float side) {
-  return texture(u_fft_texture, vec2(clamp(base + spread * side, 0.0, 1.0), 0.5)).r;
-}
 
 // Hilfsfunktion: Rauschen
 float noise(vec2 p) {
@@ -203,11 +193,11 @@ void main() {
   float stereo_shift = lr_diff * d_stereo_str * u_stereo;
   uv.x += stereo_shift;
 
-  // ── FFT-Frequenzbänder holen ───────────────────────────
-  float fft_bass  = fft_stereo(0.05, 0.15, (u_bass_left + u_bass_right) * 0.5);
-  float fft_mid   = fft_stereo(0.25, 0.15, (u_bass_left + u_bass_right) * 0.5);
-  float fft_high  = fft_stereo(0.60, 0.20, (u_bass_left + u_bass_right) * 0.5);
-  float fft_peak  = fft_stereo(0.40 + sin(u_time * 0.3) * 0.08, 0.10, (u_bass_left + u_bass_right) * 0.5);
+  // ── Frequenzbänder aus Audio-Uniforms ────────────────────
+  float fft_bass  = u_bass;
+  float fft_mid   = u_mid;
+  float fft_high  = u_high;
+  float fft_peak  = u_energy;
 
   // ── Rotation ────────────────────────────────────────────
   float angle = u_time * d_rotation * 0.12 + u_mid * d_mid_react * 0.3;
@@ -285,7 +275,8 @@ void main() {
     float x = (fi / fft_bar_count) * 2.0 - 0.9;
     float width = 1.0 / fft_bar_count * 0.8;
     float inBar = smoothstep(x - width, x, uv.x) * (1.0 - smoothstep(x, x + width, uv.x));
-    float hVal = fft_stereo(pos, 0.02, (u_bass_left + u_bass_right) * 0.5);
+    float hVal = mix(mix(u_bass, u_mid,  clamp(pos * 2.0,       0.0, 1.0)),
+                         u_high, clamp(pos * 2.0 - 1.0, 0.0, 1.0));
     float barH = hVal * 1.2;
     float top = 0.9;
     float bottom = top - barH;

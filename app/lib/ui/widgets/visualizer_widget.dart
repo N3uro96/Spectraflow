@@ -78,7 +78,21 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
       _shader    = null;
       _loaded    = false;
       _loadShader();
+    } else if (old.seed != widget.seed && _loaded) {
+      _resetFeedback();
     }
+  }
+
+  void _resetFeedback() {
+    final rec = ui.PictureRecorder();
+    Canvas(rec).drawRect(
+      const Rect.fromLTWH(0, 0, 1, 1),
+      Paint()..color = const Color(0xFF000000),
+    );
+    final black = rec.endRecording().toImageSync(1, 1);
+    final old   = _prevFrame;
+    _prevFrame  = black;
+    old?.dispose();
   }
 
   @override
