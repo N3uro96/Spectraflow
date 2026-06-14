@@ -1,117 +1,129 @@
-import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import '../../core/audio_data_provider.dart';
 
-class ShaderCanvas extends StatefulWidget {
+class ShaderCanvas extends StatelessWidget {
   final AudioDataProvider audioData;
   const ShaderCanvas({super.key, required this.audioData});
 
   @override
-  State<ShaderCanvas> createState() => _ShaderCanvasState();
-}
-
-class _ShaderCanvasState extends State<ShaderCanvas>
-    with SingleTickerProviderStateMixin {
-  ui.FragmentShader? _shader;
-  Ticker?            _ticker;
-  double             _time   = 0.0;
-  bool               _loaded = false;
-  String?            _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadShader();
-  }
-
-  @override
-  void dispose() {
-    _ticker?.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadShader() async {
-    try {
-      final program = await ui.FragmentProgram.fromAsset(
-          'lib/shaders/test_shader.frag');
-      setState(() {
-        _shader = program.fragmentShader();
-        _loaded = true;
-      });
-      _ticker = createTicker((elapsed) {
-        setState(() => _time = elapsed.inMilliseconds / 1000.0);
-      });
-      _ticker!.start();
-    } catch (e) {
-      setState(() => _error = e.toString());
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_error != null) {
-      return Center(child: Text('Shader: $_error',
-          style: const TextStyle(color: Colors.red, fontSize: 10)));
-    }
-    if (!_loaded || _shader == null) return const SizedBox.expand();
-
-    final a = widget.audioData;
-
-    return CustomPaint(
-      painter: _ShaderPainter(
-        shader:    _shader!,
-        time:      _time,
-        bass:      a.bassLeft.clamp(0.0, 1.0),
-        mid:       a.midLeft.clamp(0.0, 1.0),
-        high:      a.highLeft.clamp(0.0, 1.0),
-        energy:    a.energy.clamp(0.0, 1.0),
-        bpm:       a.bpm.clamp(60.0, 200.0),
-        beatPhase: a.beatPhase.clamp(0.0, 1.0),
-        stereo:    a.stereoWidth.clamp(0.0, 1.0),
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: _DiagnosticPainter(audioData),
+        size: Size.infinite,
       ),
-      size: Size.infinite,
     );
   }
 }
 
-class _ShaderPainter extends CustomPainter {
-  final ui.FragmentShader shader;
-  final double time, bass, mid, high, energy, bpm, beatPhase, stereo;
-
-  _ShaderPainter({
-    required this.shader,
-    required this.time,
-    required this.bass,
-    required this.mid,
-    required this.high,
-    required this.energy,
-    required this.bpm,
-    required this.beatPhase,
-    required this.stereo,
-  });
+class _DiagnosticPainter extends CustomPainter {
+  final AudioDataProvider data;
+  _DiagnosticPainter(this.data) : super(repaint: data);
 
   @override
   void paint(Canvas canvas, Size size) {
-    int f = 0;
-    shader.setFloat(f++, time);
-    shader.setFloat(f++, size.width);
-    shader.setFloat(f++, size.height);
-    shader.setFloat(f++, bass);
-    shader.setFloat(f++, mid);
-    shader.setFloat(f++, high);
-    shader.setFloat(f++, energy);
-    shader.setFloat(f++, bpm);
-    shader.setFloat(f++, beatPhase);
-    shader.setFloat(f++, 0.0); // beat_onset
-    shader.setFloat(f++, stereo);
+    final w = size.width;
+    final h = size.height;
 
+    // Schwarzer Hintergrund
     canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..shader = shader,
+      Rect.fromLTWH(0, 0, w, h),
+      Paint()..color = const Color(0xFF050505),
     );
+
+    // ── FFT Bänder Links (grün, obere Hälfte) ──
+    final barW   = w / 32.0;
+    final halfH  = h * 0.45;
+    final topY   = h * 0.05;
+
+    for (int i = 0; i < 32; i++) {
+      final val = data.envLeft[i].clamp(0.0, 1.0);
+      final bh  = val * halfH;
+      final x   = i * barW + 1;
+
+      canvas.drawRect(
+        Rect.fromLTWH(x, topY + halfH - bh, barW - 2, bh),
+        Paint()..color = Color.lerp(
+          const Color(0xFF00FF44),
+          const Color(0xFFFFFF00),
+          i / 32.0,
+        )!,
+      );
+    }
+
+    // ── FFT Bänder Rechts (blau, untere Hälfte) ──
+    final botY = h * 0.52;
+
+    for (int i = 0; i < 32; i++) {
+      final val = data.envRight[i].clamp(0.0, 1.0);
+      final bh  = val * halfH;
+      final x   = i * barW + 1;
+
+      canvas.drawRect(
+        Rect.fromLTWH(x, botY, barW - 2, bh),
+        Paint()..color = Color.lerp(
+          const Color(0xFF0088FF),
+          const Color(0xFFFF00FF),
+          i / 32.0,
+        )!,
+      );
+    }
+
+    // ── Stereo Meter (Mitte) ──
+    final meterY = h * 0.49;
+    final meterH = h * 0.02;
+    final cx     = w / 2.0;
+    final sw     = data.stereoWidth.clamp(0.0, 1.0) * (w / 2.0);
+
+    // Hintergrund
+    canvas.drawRect(
+      Rect.fromLTWH(0, meterY, w, meterH),
+      Paint()..color = Colors.white.withOpacity(0.05),
+    );
+
+    // Stereobreite (lila)
+    canvas.drawRect(
+      Rect.fromLTWH(cx - sw, meterY, sw * 2, meterH),
+      Paint()..color = const Color(0xFF8800FF).withOpacity(0.8),
+    );
+
+    // Mittellinie
+    canvas.drawLine(
+      Offset(cx, meterY),
+      Offset(cx, meterY + meterH),
+      Paint()..color = Colors.white54..strokeWidth = 1,
+    );
+
+    // ── Labels ──
+    _drawText(canvas, 'L  FFT', Offset(8, topY - 16),
+        const Color(0xFF00FF44));
+    _drawText(canvas, 'R  FFT', Offset(8, botY - 16),
+        const Color(0xFF0088FF));
+    _drawText(canvas, 'STEREO', Offset(cx - 24, meterY - 16),
+        Colors.white54);
+    _drawText(canvas, 'BPM: ${data.bpm.toStringAsFixed(0)}',
+        Offset(8, h - 20), Colors.white38);
+    _drawText(canvas,
+        'E: ${(data.energy * 100).toStringAsFixed(0)}%',
+        Offset(w - 80, h - 20), Colors.white38);
+  }
+
+  void _drawText(Canvas canvas, String text, Offset pos, Color color) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.w300,
+          letterSpacing: 1.2,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, pos);
   }
 
   @override
-  bool shouldRepaint(_ShaderPainter old) => true;
+  bool shouldRepaint(_DiagnosticPainter old) => true;
 }
