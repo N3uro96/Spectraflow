@@ -159,6 +159,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     }
 
     final audio = widget.audioData;
+    final dpr   = MediaQuery.of(context).devicePixelRatio;
 
     return GestureDetector(
       onTap:       widget.onTap,
@@ -180,6 +181,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
             palette:    widget.palette,
             feedback:   _feedback,
             prevFrame:  _prevFrame!,
+            dpr:        dpr,
             onNewFrame: _onNewFrame,
           ),
           size: Size.infinite,
@@ -198,6 +200,7 @@ class _TunnelPainter extends CustomPainter {
   final FeedbackState              feedback;
   final ui.Image                   prevFrame;
   final void Function(ui.Image)    onNewFrame;
+  final double                     dpr;
 
   _TunnelPainter({
     required this.shader,
@@ -215,6 +218,7 @@ class _TunnelPainter extends CustomPainter {
     required this.feedback,
     required this.prevFrame,
     required this.onNewFrame,
+    required this.dpr,
   });
 
   void _setColor(int idx, Color c) {
@@ -225,8 +229,10 @@ class _TunnelPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final iw = size.width.toInt();
-    final ih = size.height.toInt();
+    final double physW = size.width  * dpr;
+    final double physH = size.height * dpr;
+    final int    iw    = physW.toInt();
+    final int    ih    = physH.toInt();
     if (iw <= 0 || ih <= 0) return;
 
     // ── Offscreen-Render (für Frame-Capture) ──────────────
@@ -237,8 +243,8 @@ class _TunnelPainter extends CustomPainter {
     int f = 0;
     // Audio (0–10)
     shader.setFloat(f++, time);
-    shader.setFloat(f++, size.width);
-    shader.setFloat(f++, size.height);
+    shader.setFloat(f++, physW);
+    shader.setFloat(f++, physH);
     shader.setFloat(f++, bass);
     shader.setFloat(f++, mid);
     shader.setFloat(f++, high);
@@ -264,18 +270,21 @@ class _TunnelPainter extends CustomPainter {
     // Sampler: vorheriges Frame als Feedback-Textur
     shader.setImageSampler(0, prevFrame);
 
-    // In Offscreen-Canvas rendern
+    // In Offscreen-Canvas rendern (physische Pixel)
     offCanvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
+      Rect.fromLTWH(0, 0, physW, physH),
       Paint()..shader = shader,
     );
 
-    // Synchrones Frame-Capture — GPU rastert sofort
+    // Frame-Capture bei nativer Auflösung
     final picture  = recorder.endRecording();
     final newFrame = picture.toImageSync(iw, ih);
 
-    // Auf echten Canvas ausgeben
+    // 1:1 pixel-mapping: physisches Bild zurück auf logische Koordinaten skalieren
+    canvas.save();
+    canvas.scale(1.0 / dpr, 1.0 / dpr);
     canvas.drawImage(newFrame, Offset.zero, Paint());
+    canvas.restore();
 
     // Neues Frame für nächsten Zyklus speichern
     onNewFrame(newFrame);
