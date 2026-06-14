@@ -247,8 +247,8 @@ class _TunnelPainter extends CustomPainter {
     shader.setFloat(f++, stereo);
     shader.setFloat(f++, bassLeft);
     shader.setFloat(f++, bassRight);
-    // Seed (11) — Shader leitet DNA intern ab
-    shader.setFloat(f++, seed.toDouble());
+    // Seed (11) — normalisiert [0,1) damit sin() in GLSL präzise bleibt
+    shader.setFloat(f++, seed / 16777216.0);
     // Palette (12–23)
     _setColor(f, palette.shadow);    f += 3;
     _setColor(f, palette.low);       f += 3;
