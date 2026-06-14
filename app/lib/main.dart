@@ -26,9 +26,11 @@ class SpectraflowApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AudioManager()),
         ChangeNotifierProvider(create: (_) {
-          final provider = AudioDataProvider();
-          provider.start();
-          return provider;
+          final p = AudioDataProvider();
+          // Aktuell: skalare Werte (60fps, kein Freeze)
+          // Wenn Shader Texturen brauchen: withTextures: true
+          p.start(withTextures: false);
+          return p;
         }),
       ],
       child: MaterialApp(

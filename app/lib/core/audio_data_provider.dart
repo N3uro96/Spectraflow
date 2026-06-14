@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'native_bridge.dart';
+import 'texture_manager.dart';
 
 class AudioDataProvider extends ChangeNotifier {
+  final TextureManager textures = TextureManager();
+
   List<double> envLeft  = List.filled(32, 0.0);
   List<double> envRight = List.filled(32, 0.0);
   List<double> fftMid   = List.filled(32, 0.0);
@@ -11,27 +14,43 @@ class AudioDataProvider extends ChangeNotifier {
   double bpm         = 120.0;
   double energy      = 0.0;
   double stereoWidth = 0.0;
+  double beatPhase   = 0.0;
   double bassLeft    = 0.0;
   double bassRight   = 0.0;
   double midLeft     = 0.0;
   double highLeft    = 0.0;
-  double beatPhase   = 0.0;
 
-  Timer? _timer;
+  Timer? _scalarTimer;   // 60fps – nur skalare Werte
+  Timer? _textureTimer;  // 20fps – Texturen (wenn gebraucht)
+  bool   _textureMode = false;
 
-  void start() {
-    _timer = Timer.periodic(
-      const Duration(milliseconds: 16), // 60fps
-      (_) => _poll(),
+  void start({bool withTextures = false}) {
+    _textureMode = withTextures;
+
+    // Skalare Werte – 60fps, kein Blocking
+    _scalarTimer = Timer.periodic(
+      const Duration(milliseconds: 16),
+      (_) => _pollScalars(),
     );
+
+    // Texturen – 20fps, im Hintergrund
+    if (withTextures) {
+      _textureTimer = Timer.periodic(
+        const Duration(milliseconds: 50),
+        (_) => _pollTextures(),
+      );
+    }
   }
 
   void stop() {
-    _timer?.cancel();
-    _timer = null;
+    _scalarTimer?.cancel();
+    _textureTimer?.cancel();
+    _scalarTimer  = null;
+    _textureTimer = null;
   }
 
-  Future<void> _poll() async {
+  // ─── Schnell: nur skalare Werte ───
+  Future<void> _pollScalars() async {
     try {
       final data = await NativeBridge.getFFTData();
       if (data.length < 192) return;
@@ -55,13 +74,39 @@ class AudioDataProvider extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      debugPrint('Poll error: $e');
+      debugPrint('Scalar poll error: $e');
     }
+  }
+
+  // ─── Langsam: Texturen im Double-Buffer ───
+  Future<void> _pollTextures() async {
+    try {
+      await textures.update(
+        left:  envLeft,
+        right: envRight,
+        mid:   fftMid,
+        side:  fftSide,
+      );
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Texture poll error: $e');
+    }
+  }
+
+  // Texturen nachträglich aktivieren
+  void enableTextures() {
+    if (_textureMode) return;
+    _textureMode  = true;
+    _textureTimer = Timer.periodic(
+      const Duration(milliseconds: 50),
+      (_) => _pollTextures(),
+    );
   }
 
   @override
   void dispose() {
     stop();
+    textures.dispose();
     super.dispose();
   }
 }
