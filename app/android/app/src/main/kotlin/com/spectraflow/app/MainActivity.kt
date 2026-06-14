@@ -24,7 +24,11 @@ class MainActivity : FlutterActivity() {
                     "startMicrophone"   -> result.success(SpectraflowEngine.nativeStartMicrophone())
                     "startFilePlayback" -> {
                         val path = call.argument<String>("path") ?: ""
-                        result.success(SpectraflowEngine.nativeStartFilePlayback(path))
+                        // File-Decode auf IO-Thread – verhindert ANR auf dem Main-Thread
+                        scope.launch {
+                            val success = SpectraflowEngine.nativeStartFilePlayback(path)
+                            withContext(Dispatchers.Main) { result.success(success) }
+                        }
                     }
                     "stop"              -> { SpectraflowEngine.nativeStop(); result.success(null) }
                     else                -> result.notImplemented()

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/audio_manager.dart';
 import '../../core/audio_data_provider.dart';
 import '../../core/seed_manager.dart';
+import '../../core/palette_manager.dart';
 import '../../core/dna_generator.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
@@ -14,17 +15,24 @@ class VisualizerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final audio     = context.watch<AudioManager>();
+    final audio    = context.watch<AudioManager>();
     final audioData = context.read<AudioDataProvider>();
-    final seeds     = context.watch<SeedManager>();
-    final dna       = DNAGenerator.generate(seeds.currentSeed);
+    final seeds    = context.watch<SeedManager>();
+    final palettes = context.watch<PaletteManager>();
+    final dna      = DNAGenerator.generate(seeds.currentSeed);
 
     return Scaffold(
       backgroundColor: SFTheme.background,
       body: Stack(
         children: [
           Positioned.fill(
-            child: VisualizerWidget(audioData: audioData, dna: dna),
+            child: VisualizerWidget(
+              audioData:   audioData,
+              dna:         dna,
+              palette:     palettes.current,
+              onTap:       palettes.next,
+              onDoubleTap: palettes.randomize,
+            ),
           ),
           SafeArea(
             child: Column(
@@ -42,12 +50,16 @@ class VisualizerScreen extends StatelessWidget {
   }
 }
 
+// ── Top Bar ──────────────────────────────────────────────────
+
 class _TopBar extends StatelessWidget {
   final AudioDataProvider audioData;
   const _TopBar({required this.audioData});
 
   @override
   Widget build(BuildContext context) {
+    final accent = context.watch<PaletteManager>().accent;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
@@ -64,7 +76,7 @@ class _TopBar extends StatelessWidget {
                 borderRadius: SFTheme.radiusSm,
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text('${audioData.bpm.toStringAsFixed(0)}',
-                      style: SFTheme.titleMedium),
+                      style: SFTheme.titleMedium.copyWith(color: accent)),
                   const SizedBox(width: 4),
                   Text('BPM', style: SFTheme.labelSmall),
                 ]),
@@ -75,7 +87,7 @@ class _TopBar extends StatelessWidget {
                 borderRadius: SFTheme.radiusSm,
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Text('${(audioData.stereoWidth * 100).toStringAsFixed(0)}%',
-                      style: SFTheme.titleMedium),
+                      style: SFTheme.titleMedium.copyWith(color: accent)),
                   const SizedBox(width: 4),
                   Text('STEREO', style: SFTheme.labelSmall),
                 ]),
@@ -87,6 +99,8 @@ class _TopBar extends StatelessWidget {
     ).animate().fadeIn(duration: 600.ms);
   }
 }
+
+// ── Now Playing ───────────────────────────────────────────────
 
 class _NowPlaying extends StatelessWidget {
   final AudioManager audio;
@@ -123,26 +137,17 @@ class _NowPlaying extends StatelessWidget {
   }
 }
 
-class _BottomPanel extends StatefulWidget {
+// ── Bottom Panel ─────────────────────────────────────────────
+
+class _BottomPanel extends StatelessWidget {
   final AudioManager audio;
   const _BottomPanel({required this.audio});
 
   @override
-  State<_BottomPanel> createState() => _BottomPanelState();
-}
-
-class _BottomPanelState extends State<_BottomPanel> {
-  int _paletteIndex = 0;
-
-  final List<Color> _paletteColors = [
-    const Color(0xFF6C63FF), const Color(0xFFFF6584),
-    const Color(0xFF43E97B), const Color(0xFFFA8231),
-    const Color(0xFF00D2FF), const Color(0xFFFFD700),
-  ];
-
-  @override
   Widget build(BuildContext context) {
-    final seeds = context.watch<SeedManager>();
+    final seeds    = context.watch<SeedManager>();
+    final palettes = context.watch<PaletteManager>();
+    final accent   = palettes.accent;
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -152,7 +157,7 @@ class _BottomPanelState extends State<_BottomPanel> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Seed Anzeige + Würfel Button
+            // Seed + Palette-Name
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -161,33 +166,34 @@ class _BottomPanelState extends State<_BottomPanel> {
                   children: [
                     Text('SEED', style: SFTheme.labelSmall),
                     const SizedBox(height: 4),
-                    Text(
-                      '#${seeds.currentSeed}',
+                    Text('#${seeds.currentSeed}',
                       style: SFTheme.titleMedium.copyWith(
-                        fontFamily: 'monospace',
-                        letterSpacing: 2,
-                      ),
-                    ),
+                        fontFamily: 'monospace', letterSpacing: 2)),
                   ],
                 ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('PALETTE', style: SFTheme.labelSmall),
+                    const SizedBox(height: 4),
+                    Text(palettes.current.name,
+                      style: SFTheme.titleMedium.copyWith(color: accent)),
+                  ],
+                ),
+                // Würfel — neuer Seed
                 GestureDetector(
                   onTap: () => context.read<SeedManager>().randomize(),
                   child: GlassContainer(
                     padding: const EdgeInsets.all(14),
                     borderRadius: SFTheme.radiusSm,
-                    child: Icon(
-                      Icons.casino_rounded,
-                      color: SFTheme.textPrimary,
-                      size: 24,
-                    ),
+                    child: Icon(Icons.casino_rounded,
+                      color: accent, size: 24),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            _buildPaletteSelector(),
             const SizedBox(height: 24),
-            _buildPlaybackControls(),
+            _buildPlaybackControls(context, accent),
           ],
         ),
       ),
@@ -196,46 +202,7 @@ class _BottomPanelState extends State<_BottomPanel> {
       .fadeIn(duration: 600.ms);
   }
 
-  Widget _buildPaletteSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('PALETTE', style: SFTheme.labelSmall),
-        const SizedBox(height: 10),
-        Row(
-          children: List.generate(_paletteColors.length, (index) {
-            final selected = index == _paletteIndex;
-            return GestureDetector(
-              onTap: () => setState(() => _paletteIndex = index),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.only(right: 10),
-                width: selected ? 32 : 24,
-                height: selected ? 32 : 24,
-                decoration: BoxDecoration(
-                  color: _paletteColors[index],
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: selected
-                        ? Colors.white.withOpacity(0.8)
-                        : Colors.transparent,
-                    width: 2,
-                  ),
-                  boxShadow: selected ? [BoxShadow(
-                    color: _paletteColors[index].withOpacity(0.6),
-                    blurRadius: 12, spreadRadius: 2,
-                  )] : null,
-                ),
-              ),
-            );
-          }),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPlaybackControls() {
-    final audio = widget.audio;
+  Widget _buildPlaybackControls(BuildContext context, Color accent) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
@@ -243,6 +210,7 @@ class _BottomPanelState extends State<_BottomPanel> {
           icon: audio.source == AudioSource.microphone
               ? Icons.mic_rounded : Icons.mic_none_rounded,
           label: 'MIC',
+          accent: accent,
           active: audio.source == AudioSource.microphone,
           onTap: () async {
             if (audio.source == AudioSource.microphone) {
@@ -261,12 +229,11 @@ class _BottomPanelState extends State<_BottomPanel> {
             decoration: BoxDecoration(
               color: SFTheme.glassAccent,
               shape: BoxShape.circle,
-              border: Border.all(color: SFTheme.glassBorder, width: 0.5),
+              border: Border.all(color: accent.withOpacity(0.5), width: 1.5),
             ),
             child: Icon(
               audio.isPlaying ? Icons.stop_rounded : Icons.play_arrow_rounded,
-              color: audio.source == AudioSource.none
-                  ? SFTheme.textHint : SFTheme.textPrimary,
+              color: audio.source == AudioSource.none ? SFTheme.textHint : accent,
               size: 32,
             ),
           ),
@@ -275,6 +242,7 @@ class _BottomPanelState extends State<_BottomPanel> {
         _buildControlButton(
           icon: Icons.folder_open_rounded,
           label: 'FILE',
+          accent: accent,
           active: audio.source == AudioSource.file,
           onTap: () async => await audio.pickAudioFile(),
         ),
@@ -285,6 +253,7 @@ class _BottomPanelState extends State<_BottomPanel> {
   Widget _buildControlButton({
     required IconData icon,
     required String label,
+    required Color accent,
     required VoidCallback onTap,
     bool active = false,
   }) {
@@ -298,12 +267,10 @@ class _BottomPanelState extends State<_BottomPanel> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon,
-              color: active ? SFTheme.textPrimary : SFTheme.textSecondary,
-              size: 20),
+              color: active ? accent : SFTheme.textSecondary, size: 20),
             const SizedBox(height: 4),
             Text(label, style: SFTheme.labelSmall.copyWith(
-              color: active ? SFTheme.textPrimary : SFTheme.textHint,
-            )),
+              color: active ? accent : SFTheme.textHint)),
           ],
         ),
       ),

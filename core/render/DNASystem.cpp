@@ -64,20 +64,18 @@ ShaderDNA DNASystem::generate(uint64_t seed, int shader_id)
     // Shader ID als Salt – gleicher Seed, anderer Shader = andere DNA
     uint64_t state = hash(seed, static_cast<uint64_t>(shader_id));
 
-    // Basis-Parameter aus Seed generieren
-    dna.zoom     = next_float(state, param_ranges_[0].min,  param_ranges_[0].max);
-    dna.rotation = next_float(state, param_ranges_[1].min,  param_ranges_[1].max);
-    dna.warp_x   = next_float(state, param_ranges_[2].min,  param_ranges_[2].max);
-    dna.warp_y   = next_float(state, param_ranges_[3].min,  param_ranges_[3].max);
-    dna.dx       = next_float(state, param_ranges_[4].min,  param_ranges_[4].max);
-    dna.dy       = next_float(state, param_ranges_[5].min,  param_ranges_[5].max);
-
-    // Erweiterte Parameter
+    // Alle 16 Parameter in einem Durchgang generieren
     for (size_t i = 0; i < 16; i++) {
-        dna.params[i] = next_float(state,
-                                    param_ranges_[i].min,
-                                    param_ranges_[i].max);
+        dna.params[i] = next_float(state, param_ranges_[i].min, param_ranges_[i].max);
     }
+
+    // Benannte Felder sind Aliase der params-Einträge — kein doppelter PRNG-Verbrauch
+    dna.zoom     = dna.params[0];
+    dna.rotation = dna.params[1];
+    dna.warp_x   = dna.params[2];
+    dna.warp_y   = dna.params[3];
+    dna.dx       = dna.params[4];
+    dna.dy       = dna.params[5];
 
     return dna;
 }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'core/audio_data_provider.dart';
 import 'core/audio_manager.dart';
+import 'core/palette_manager.dart';
 import 'core/seed_manager.dart';
 import 'ui/screens/visualizer_screen.dart';
 import 'ui/theme/sf_theme.dart';
@@ -32,6 +33,7 @@ class SpectraflowApp extends StatelessWidget {
           return p;
         }),
         ChangeNotifierProvider(create: (_) => SeedManager()),
+        ChangeNotifierProvider(create: (_) => PaletteManager()),
       ],
       child: MaterialApp(
         title: 'Spectraflow',

@@ -7,6 +7,9 @@ static constexpr float PI = 3.14159265358979323846f;
 FFTAnalyzer::FFTAnalyzer()
     : in_buf_(FFT_SIZE), out_buf_(FFT_SIZE) // Speicher 1x beim Start reservieren
 {
+    sample_rate_ = 44100.0f;
+    attack_ms_ = 10.0f;
+    release_ms_ = 50.0f;
     cfg_ = kiss_fft_alloc(FFT_SIZE, 0, nullptr, nullptr);
     for (size_t i = 0; i < FFT_SIZE; i++)
         hanning_window_[i] = 0.5f * (1.0f - std::cos(2.0f * PI * i / (FFT_SIZE - 1)));
@@ -51,17 +54,24 @@ void FFTAnalyzer::process(const float* left, const float* right,
     out.stereo_width = (mid_energy > 1e-6f)
         ? std::min(1.0f, side_energy / mid_energy) : 0.0f;
 
+    static_assert(NUM_BANDS == 32, "Band boundary constants below must be updated if NUM_BANDS changes");
+    static constexpr int BASS_END = 8;        // indices 0 – 7
+    static constexpr int MID_END  = 20;       // indices 8 – 19, HIGH: 20 – 31
+    static constexpr float BASS_N = static_cast<float>(BASS_END);
+    static constexpr float MID_N  = static_cast<float>(MID_END - BASS_END);
+    static constexpr float HIGH_N = static_cast<float>(NUM_BANDS - MID_END);
+
     out.bass_left = out.bass_right = 0.0f;
     out.mid_left  = out.mid_right  = 0.0f;
     out.high_left = out.high_right = 0.0f;
 
-    for (int i = 0;  i < 8;  i++) { out.bass_left += out.env_left[i]; out.bass_right += out.env_right[i]; }
-    for (int i = 8;  i < 20; i++) { out.mid_left  += out.env_left[i]; out.mid_right  += out.env_right[i]; }
-    for (int i = 20; i < 32; i++) { out.high_left += out.env_left[i]; out.high_right += out.env_right[i]; }
+    for (int i = 0;        i < BASS_END;            i++) { out.bass_left += out.env_left[i]; out.bass_right += out.env_right[i]; }
+    for (int i = BASS_END; i < MID_END;             i++) { out.mid_left  += out.env_left[i]; out.mid_right  += out.env_right[i]; }
+    for (int i = MID_END;  i < (int)NUM_BANDS; i++) { out.high_left += out.env_left[i]; out.high_right += out.env_right[i]; }
 
-    out.bass_left /= 8.0f;  out.bass_right /= 8.0f;
-    out.mid_left  /= 12.0f; out.mid_right  /= 12.0f;
-    out.high_left /= 12.0f; out.high_right /= 12.0f;
+    out.bass_left /= BASS_N; out.bass_right /= BASS_N;
+    out.mid_left  /= MID_N;  out.mid_right  /= MID_N;
+    out.high_left /= HIGH_N; out.high_right /= HIGH_N;
 
     out.energy = 0.0f;
     for (size_t i = 0; i < NUM_BANDS; i++)
