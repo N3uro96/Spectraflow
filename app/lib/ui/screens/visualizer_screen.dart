@@ -7,6 +7,7 @@ import '../../core/fps_counter.dart';
 import '../../core/seed_manager.dart';
 import '../../core/palette_manager.dart';
 import '../../core/dna_generator.dart';
+import '../widgets/visualizer_widget.dart' show kShaderPaths, kShaderNames;
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/visualizer_widget.dart';
@@ -16,11 +17,12 @@ class VisualizerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final audio    = context.watch<AudioManager>();
+    final audio     = context.watch<AudioManager>();
     final audioData = context.read<AudioDataProvider>();
-    final seeds    = context.watch<SeedManager>();
-    final palettes = context.watch<PaletteManager>();
-    final dna      = DNAGenerator.generate(seeds.currentSeed);
+    final seeds     = context.watch<SeedManager>();
+    final palettes  = context.watch<PaletteManager>();
+    final dna       = DNAGenerator.generate(seeds.currentSeed);
+    final shaderIdx = seeds.currentShader % kShaderPaths.length;
 
     return Scaffold(
       backgroundColor: SFTheme.background,
@@ -31,6 +33,7 @@ class VisualizerScreen extends StatelessWidget {
               audioData:   audioData,
               dna:         dna,
               palette:     palettes.current,
+              shaderPath:  kShaderPaths[shaderIdx],
               onTap:       palettes.next,
               onDoubleTap: palettes.randomize,
             ),
@@ -161,6 +164,8 @@ class _BottomPanel extends StatelessWidget {
     final seeds    = context.watch<SeedManager>();
     final palettes = context.watch<PaletteManager>();
     final accent   = palettes.accent;
+    final shaderIdx  = seeds.currentShader % kShaderPaths.length;
+    final shaderName = kShaderNames[shaderIdx];
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -170,7 +175,7 @@ class _BottomPanel extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Seed + Palette-Name
+            // Seed + Palette-Name + Buttons
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -193,15 +198,41 @@ class _BottomPanel extends StatelessWidget {
                       style: SFTheme.titleMedium.copyWith(color: accent)),
                   ],
                 ),
-                // Würfel — neuer Seed
-                GestureDetector(
-                  onTap: () => context.read<SeedManager>().randomize(),
-                  child: GlassContainer(
-                    padding: const EdgeInsets.all(14),
-                    borderRadius: SFTheme.radiusSm,
-                    child: Icon(Icons.casino_rounded,
-                      color: accent, size: 24),
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Würfel — neuer Seed
+                    GestureDetector(
+                      onTap: () => context.read<SeedManager>().randomize(),
+                      child: GlassContainer(
+                        padding: const EdgeInsets.all(14),
+                        borderRadius: SFTheme.radiusSm,
+                        child: Icon(Icons.casino_rounded,
+                          color: accent, size: 24),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    // Shader wechseln
+                    GestureDetector(
+                      onTap: () => context.read<SeedManager>()
+                          .nextShader(kShaderPaths.length),
+                      child: GlassContainer(
+                        padding: const EdgeInsets.all(14),
+                        borderRadius: SFTheme.radiusSm,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.auto_awesome_rounded,
+                              color: accent, size: 20),
+                            const SizedBox(height: 2),
+                            Text(shaderName,
+                              style: SFTheme.labelSmall.copyWith(
+                                color: accent, fontSize: 8)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

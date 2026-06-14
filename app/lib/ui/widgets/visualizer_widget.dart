@@ -8,18 +8,27 @@ import '../../core/feedback_state.dart';
 import '../../core/fps_counter.dart';
 import '../../core/palette_data.dart';
 
+const List<String> kShaderPaths = [
+  'lib/shaders/smoke.frag',
+  'lib/shaders/tunnel.frag',
+];
+
+const List<String> kShaderNames = ['SMOKE', 'TUNNEL'];
+
 class VisualizerWidget extends StatefulWidget {
   final AudioDataProvider audioData;
   final DNAParams         dna;
   final SFPalette         palette;
+  final String            shaderPath;
   final VoidCallback?     onTap;
   final VoidCallback?     onDoubleTap;
 
   const VisualizerWidget({
     super.key,
     required this.audioData,
-    this.dna     = DNAParams.defaults,
+    this.dna        = DNAParams.defaults,
     required this.palette,
+    this.shaderPath = 'lib/shaders/smoke.frag',
     this.onTap,
     this.onDoubleTap,
   });
@@ -54,6 +63,19 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   }
 
   @override
+  void didUpdateWidget(VisualizerWidget old) {
+    super.didUpdateWidget(old);
+    if (old.shaderPath != widget.shaderPath) {
+      _ticker?.stop();
+      _prevFrame?.dispose();
+      _prevFrame = null;
+      _shader    = null;
+      _loaded    = false;
+      _loadShader();
+    }
+  }
+
+  @override
   void dispose() {
     _ticker?.dispose();
     _prevFrame?.dispose();
@@ -62,8 +84,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
 
   Future<void> _loadShader() async {
     try {
-      final program = await ui.FragmentProgram.fromAsset(
-          'lib/shaders/smoke.frag');
+      final program = await ui.FragmentProgram.fromAsset(widget.shaderPath);
 
       // Schwarzes 1×1-Platzhalter-Frame damit sampler2D immer gesetzt ist
       final rec = ui.PictureRecorder();

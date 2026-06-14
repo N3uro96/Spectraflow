@@ -24,6 +24,12 @@ class SeedManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Nächsten Shader aktivieren (zyklisch)
+  void nextShader(int count) {
+    _currentShader = (_currentShader + 1) % count;
+    notifyListeners();
+  }
+
   // Seed manuell setzen (später für KI)
   void setSeed(int seed) {
     _currentSeed = seed;
