@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ─────────────────────────────────────────
-# Oboe via FetchContent (automatischer Download)
+# Oboe via FetchContent
 # ─────────────────────────────────────────
 include(FetchContent)
 FetchContent_Declare(
@@ -17,17 +17,19 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(oboe)
 
 # ─────────────────────────────────────────
+# Pfade – 3 Ebenen hoch zur Repo-Root
+# ─────────────────────────────────────────
+set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../core)
+
+# ─────────────────────────────────────────
 # kissfft
 # ─────────────────────────────────────────
-set(KISSFFT_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../core/kissfft)
-add_library(kissfft STATIC ${KISSFFT_DIR}/kiss_fft.c)
-target_include_directories(kissfft PUBLIC ${KISSFFT_DIR})
+add_library(kissfft STATIC ${CORE_DIR}/kissfft/kiss_fft.c)
+target_include_directories(kissfft PUBLIC ${CORE_DIR}/kissfft)
 
 # ─────────────────────────────────────────
 # Core Sources
 # ─────────────────────────────────────────
-set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../core)
-
 add_library(spectraflow_core SHARED
     ${CORE_DIR}/audio/AudioEngine.cpp
     ${CORE_DIR}/audio/FFTAnalyzer.cpp
