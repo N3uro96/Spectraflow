@@ -5,6 +5,7 @@
 static constexpr float PI = 3.14159265358979323846f;
 
 FFTAnalyzer::FFTAnalyzer()
+    : in_buf_(FFT_SIZE), out_buf_(FFT_SIZE) // Speicher 1x beim Start reservieren
 {
     cfg_ = kiss_fft_alloc(FFT_SIZE, 0, nullptr, nullptr);
     for (size_t i = 0; i < FFT_SIZE; i++)
@@ -34,7 +35,6 @@ void FFTAnalyzer::build_log_bands()
 void FFTAnalyzer::process(const float* left, const float* right,
                            size_t num_samples, AudioData& out)
 {
-    // .data() konvertiert std::array → float*
     compute_fft(left,  out.fft_left.data());
     compute_fft(right, out.fft_right.data());
     compute_mid_side(out);
@@ -69,26 +69,27 @@ void FFTAnalyzer::process(const float* left, const float* right,
 
 void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
 {
-    std::vector<kiss_fft_cpx> in_buf(FFT_SIZE);
-    std::vector<kiss_fft_cpx> out_buf(FFT_SIZE);
-
+    // Die Vektoren werden hier jetzt nicht mehr neu erstellt!
+    
     for (size_t i = 0; i < FFT_SIZE; i++) {
-        in_buf[i].r = samples[i] * hanning_window_[i];
-        in_buf[i].i = 0.0f;
+        in_buf_[i].r = samples[i] * hanning_window_[i];
+        in_buf_[i].i = 0.0f;
     }
-
-    kiss_fft(cfg_, in_buf.data(), out_buf.data());
-
+    
+    kiss_fft(cfg_, in_buf_.data(), out_buf_.data());
+    
     for (size_t b = 0; b < NUM_BANDS; b++) {
         int   start  = band_limits_[b];
         int   end    = band_limits_[b + 1];
         float energy = 0.0f;
         int   count  = 0;
+        
         for (int bin = start; bin < end; bin++) {
-            float r = out_buf[bin].r, im = out_buf[bin].i;
+            float r = out_buf_[bin].r, im = out_buf_[bin].i;
             energy += std::sqrt(r * r + im * im);
             count++;
         }
+        
         bands_out[b] = (count > 0)
             ? std::min(1.0f, (energy / count) / (FFT_SIZE * 0.5f)) : 0.0f;
     }

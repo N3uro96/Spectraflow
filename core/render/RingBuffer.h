@@ -7,8 +7,6 @@ public:
     RingBuffer() : has_data_(false) {}
 
     bool push(const T& item) {
-        // Überschreibt gnadenlos den alten Frame mit dem neusten.
-        // So läuft der Buffer niemals voll.
         std::lock_guard<std::mutex> lock(mutex_);
         latest_data_ = item;
         has_data_ = true;
@@ -23,7 +21,6 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         if (!has_data_) return false;
         
-        // Gibt immer den neusten Frame an das JNI/Flutter UI zurück
         item = latest_data_;
         return true;
     }

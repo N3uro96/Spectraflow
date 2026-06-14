@@ -5,13 +5,20 @@ class NativeBridge {
   static const _method = MethodChannel('com.spectraflow.app/engine');
   static const _event  = EventChannel('com.spectraflow.app/audio_data');
 
-  // FIX: Sicheres Casten der Kotlin-Daten in eine Float64List
   static Stream<Float64List> get audioStream =>
-      _event.receiveBroadcastStream().map((data) {
+      _event.receiveBroadcastStream().map((dynamic data) {
         if (data is Float64List) return data;
         if (data is Float32List) return Float64List.fromList(data.toList());
-        // Fallback: Wenn es als generische Liste (List<dynamic>) von Kotlin ankommt
-        return Float64List.fromList((data as List<dynamic>).cast<double>());
+        
+        // Kugelsicherer Fallback, falls Kotlin/Flutter Zahlen als Ints komprimiert hat
+        if (data is List) {
+          final result = Float64List(data.length);
+          for (int i = 0; i < data.length; i++) {
+            result[i] = (data[i] as num).toDouble();
+          }
+          return result;
+        }
+        return Float64List(0);
       });
 
   static Future<bool> init() async {
