@@ -115,11 +115,8 @@ extern "C" {
 #endif
 
 // Feedback State updaten und abholen
-void sf_update_feedback(float delta_time);
+void sf_update_feedback(SF_ShaderDNA current_dna, float delta_time);
 bool sf_get_feedback_state(SF_FeedbackState* out);
-
-// Shader + Seed setzen
-void sf_set_shader(int shader_id, uint64_t seed);
 
 #ifdef __cplusplus
 }

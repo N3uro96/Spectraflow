@@ -11,10 +11,6 @@ static std::unique_ptr<AudioEngine>      g_audio;
 static std::unique_ptr<DNASystem>        g_dna;
 static std::unique_ptr<FeedbackRenderer> g_feedback;
 
-static int       g_shader_id = 0;
-static uint64_t  g_seed      = 0;
-static ShaderDNA g_current_dna{};
-
 static void audio_to_ffi(const AudioData& src, SF_AudioData& dst)
 {
     std::memcpy(dst.fft_left,   src.fft_left.data(),   sizeof(float) * 32);
@@ -47,8 +43,6 @@ bool sf_init()
     g_audio    = std::make_unique<AudioEngine>();
     g_dna      = std::make_unique<DNASystem>();
     g_feedback = std::make_unique<FeedbackRenderer>();
-    g_seed     = g_dna->random_seed();
-    g_current_dna = g_dna->generate(g_seed, g_shader_id);
     return g_audio->start();
 }
 
@@ -82,12 +76,24 @@ float sf_get_stereo_width() { return g_audio ? g_audio->get_stereo_width() : 0.0
 // ─────────────────────────────────────────
 // Feedback State
 // ─────────────────────────────────────────
-void sf_update_feedback(float delta_time)
+void sf_update_feedback(SF_ShaderDNA current_dna, float delta_time)
 {
     if (!g_feedback || !g_audio) return;
     AudioData audio{};
     g_audio->get_latest(audio);
-    g_feedback->update(g_current_dna, audio, delta_time);
+    
+    // Wandle FFI Struct zurück ins C++ Struct
+    ShaderDNA cpp_dna{};
+    cpp_dna.seed = current_dna.seed;
+    cpp_dna.zoom = current_dna.zoom;
+    cpp_dna.rotation = current_dna.rotation;
+    cpp_dna.warp_x = current_dna.warp_x;
+    cpp_dna.warp_y = current_dna.warp_y;
+    cpp_dna.dx = current_dna.dx;
+    cpp_dna.dy = current_dna.dy;
+    std::memcpy(cpp_dna.params, current_dna.params, sizeof(float) * 16);
+    
+    g_feedback->update(cpp_dna, audio, delta_time);
 }
 
 bool sf_get_feedback_state(SF_FeedbackState* out)
@@ -110,13 +116,6 @@ bool sf_get_feedback_state(SF_FeedbackState* out)
     out->high       = s.high;
     out->energy     = s.energy;
     return true;
-}
-
-void sf_set_shader(int shader_id, uint64_t seed)
-{
-    g_shader_id   = shader_id;
-    g_seed        = seed;
-    if (g_dna) g_current_dna = g_dna->generate(seed, shader_id);
 }
 
 SF_ShaderDNA sf_generate_dna(uint64_t seed, int shader_id)
