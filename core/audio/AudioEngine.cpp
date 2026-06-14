@@ -34,6 +34,13 @@ void AudioEngine::feed(const float* left, const float* right, size_t num_samples
 }
 
 bool AudioEngine::get_latest(AudioData& out) { return ring_buffer_.peek_latest(out); }
-void AudioEngine::set_sample_rate(float sr)  { sample_rate_ = sr; bpm_->set_sample_rate(sr); }
-void AudioEngine::set_attack(float ms)       { fft_->set_attack(ms); }
-void AudioEngine::set_release(float ms)      { fft_->set_release(ms); }
+
+void AudioEngine::set_sample_rate(float sr)
+{
+    sample_rate_ = sr;
+    fft_->set_sample_rate(sr);   // Fix: FFT bekommt auch die echte Sample Rate
+    bpm_->set_sample_rate(sr);
+}
+
+void AudioEngine::set_attack(float ms)  { fft_->set_attack(ms); }
+void AudioEngine::set_release(float ms) { fft_->set_release(ms); }

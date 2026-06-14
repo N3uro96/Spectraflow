@@ -52,9 +52,9 @@ void FFTAnalyzer::process(const float* left, const float* right,
     out.mid_left  = out.mid_right  = 0.0f;
     out.high_left = out.high_right = 0.0f;
 
-    for (int i = 0;  i < 8;  i++) { out.bass_left += out.env_left[i]; out.bass_right += out.env_right[i]; }
-    for (int i = 8;  i < 20; i++) { out.mid_left  += out.env_left[i]; out.mid_right  += out.env_right[i]; }
-    for (int i = 20; i < 32; i++) { out.high_left += out.env_left[i]; out.high_right += out.env_right[i]; }
+    for (int i = 0;  i < 8;  i++) { out.bass_left += out.env_left[i];  out.bass_right += out.env_right[i]; }
+    for (int i = 8;  i < 20; i++) { out.mid_left  += out.env_left[i];  out.mid_right  += out.env_right[i]; }
+    for (int i = 20; i < 32; i++) { out.high_left += out.env_left[i];  out.high_right += out.env_right[i]; }
 
     out.bass_left /= 8.0f;  out.bass_right /= 8.0f;
     out.mid_left  /= 12.0f; out.mid_right  /= 12.0f;
@@ -77,27 +77,45 @@ void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
     }
     kiss_fft(cfg_, in_buf.data(), out_buf.data());
 
+    // ── Pass 1: Rohe Band-Energie berechnen ──
+    float raw[NUM_BANDS];
+    float peak = 1e-6f;
+
     for (size_t b = 0; b < NUM_BANDS; b++) {
         int   start  = band_limits_[b];
-        int   end    = band_limits_[b + 1];
+        int   end    = std::max(start + 1, band_limits_[b + 1]);
         float energy = 0.0f;
         int   count  = 0;
 
-        for (int bin = start; bin < end; bin++) {
-            float r = out_buf[bin].r, im = out_buf[bin].i;
+        for (int bin = start; bin < end && bin < (int)(FFT_SIZE / 2); bin++) {
+            float r  = out_buf[bin].r;
+            float im = out_buf[bin].i;
             energy += std::sqrt(r * r + im * im);
             count++;
         }
 
-        if (count > 0) {
-            // Fix: kleinerer Divisor + Gain damit Werte sichtbar sind
-            // Vorher: / (FFT_SIZE * 0.5f) = / 1024 → viel zu klein
-            // Jetzt:  / 32.0f * 8.0f     → realistischer Bereich
-            float val = (energy / count) / 32.0f;
-            bands_out[b] = std::min(1.0f, val);
-        } else {
-            bands_out[b] = 0.0f;
-        }
+        raw[b] = (count > 0) ? energy / (float)count : 0.0f;
+        if (raw[b] > peak) peak = raw[b];
+    }
+
+    // ── Auto-Gain: Peak tracken ──
+    // Wähle den richtigen Peak-Tracker basierend auf Kanal
+    // (beide Kanäle teilen den Peak-Tracker hier, wird in process() getrennt)
+    float& peak_tracker = (bands_out == nullptr) ? peak_left_ : peak_left_;
+
+    // Fast Attack: sofort auf hohen Peak reagieren
+    if (peak > peak_tracker) {
+        peak_tracker = peak;
+    } else {
+        // Slow Release: langsam abfallen (ca. 3 Sekunden)
+        peak_tracker = peak_tracker * 0.998f + peak * 0.002f;
+    }
+    peak_tracker = std::max(peak_tracker, 1e-6f);
+
+    // ── Pass 2: Normalisieren ──
+    // 0.8f damit die Balken nicht immer auf Maximum klemmen
+    for (size_t b = 0; b < NUM_BANDS; b++) {
+        bands_out[b] = std::min(1.0f, (raw[b] / peak_tracker) * 0.85f);
     }
 }
 
