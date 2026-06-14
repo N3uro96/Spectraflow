@@ -40,7 +40,7 @@ class VisualizerWidget extends StatefulWidget {
 }
 
 class _VisualizerWidgetState extends State<VisualizerWidget>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
 
   ui.FragmentShader?  _shader;
   bool                _loaded = false;
@@ -68,7 +68,8 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   void didUpdateWidget(VisualizerWidget old) {
     super.didUpdateWidget(old);
     if (old.shaderPath != widget.shaderPath) {
-      _ticker?.stop();
+      _ticker?.dispose();
+      _ticker    = null;
       _prevFrame?.dispose();
       _prevFrame = null;
       _shader    = null;
