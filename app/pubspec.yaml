@@ -31,3 +31,4 @@ flutter:
     - lib/shaders/kaleidoscope.frag
     - lib/shaders/chessboard.frag
     - lib/shaders/fractal.frag
+    - lib/shaders/blinding_lights.frag

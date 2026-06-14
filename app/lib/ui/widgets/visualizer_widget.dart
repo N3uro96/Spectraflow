@@ -15,9 +15,10 @@ const List<String> kShaderPaths = [
   'lib/shaders/kaleidoscope.frag',
   'lib/shaders/chessboard.frag',
   'lib/shaders/fractal.frag',
+  'lib/shaders/blinding_lights.frag',
 ];
 
-const List<String> kShaderNames = ['SMOKE', 'TUNNEL', 'PLASMA', 'PARTICLES', 'KALEIDO', 'CHESS', 'FRACTAL'];
+const List<String> kShaderNames = ['SMOKE', 'TUNNEL', 'PLASMA', 'PARTICLES', 'KALEIDO', 'CHESS', 'FRACTAL', 'BLINDING'];
 
 class VisualizerWidget extends StatefulWidget {
   final AudioDataProvider audioData;
