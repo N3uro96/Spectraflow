@@ -8,6 +8,9 @@ class SeedManager extends ChangeNotifier {
   int get currentSeed   => _currentSeed;
   int get currentShader => _currentShader;
 
+  // Max seed for exact Float32 representation (2^24 = 16,777,216)
+  static const int _maxSafeSeed = 1 << 24;
+
   SeedManager() {
     _currentSeed = _randomSeed();
   }
@@ -32,9 +35,9 @@ class SeedManager extends ChangeNotifier {
 
   // Seed manuell setzen (später für KI)
   void setSeed(int seed) {
-    _currentSeed = seed;
+    _currentSeed = seed % _maxSafeSeed;
     notifyListeners();
   }
 
-  int _randomSeed() => Random().nextInt(999999999);
+  int _randomSeed() => Random().nextInt(_maxSafeSeed);
 }
