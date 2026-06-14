@@ -16,14 +16,13 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   Ticker?            _ticker;
   double             _time   = 0.0;
   bool               _loaded = false;
+  String?            _error;
 
-  // Placeholder FFT Daten
   final List<double> _fftLeft  = List.generate(32, (i) =>
-      0.1 + 0.4 * (i % 8) / 8.0);
+      0.3 + 0.5 * (i % 8) / 8.0);
   final List<double> _fftRight = List.generate(32, (i) =>
-      0.15 + 0.35 * ((i + 4) % 8) / 8.0);
+      0.35 + 0.45 * ((i + 4) % 8) / 8.0);
 
-  // FFT Texturen
   ui.Image? _texLeft;
   ui.Image? _texRight;
   ui.Image? _texMid;
@@ -36,13 +35,13 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   }
 
   Future<ui.Image> _buildFFTTexture(List<double> bands) async {
-    final pixels = Uint8List(32 * 4); // 32 Pixel RGBA
+    final pixels = Uint8List(32 * 4);
     for (int i = 0; i < 32; i++) {
       final val = (bands[i].clamp(0.0, 1.0) * 255).toInt();
-      pixels[i * 4 + 0] = val; // R
-      pixels[i * 4 + 1] = val; // G
-      pixels[i * 4 + 2] = val; // B
-      pixels[i * 4 + 3] = 255; // A
+      pixels[i * 4 + 0] = val;
+      pixels[i * 4 + 1] = val;
+      pixels[i * 4 + 2] = val;
+      pixels[i * 4 + 3] = 255;
     }
     final codec = await ui.ImageDescriptor.raw(
       await ui.ImmutableBuffer.fromUint8List(pixels),
@@ -54,32 +53,34 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   }
 
   Future<void> _loadShader() async {
-    // Shader laden
-    final program = await ui.FragmentProgram.fromAsset(
-      'lib/shaders/test_shader.frag',
-    );
+    try {
+      final program = await ui.FragmentProgram.fromAsset(
+        'lib/shaders/test_shader.frag',
+      );
 
-    // Mid/Side berechnen
-    final mid  = List.generate(32, (i) =>
-        (_fftLeft[i] + _fftRight[i]) * 0.5);
-    final side = List.generate(32, (i) =>
-        (_fftLeft[i] - _fftRight[i]).abs() * 0.5);
+      final mid  = List.generate(32, (i) =>
+          (_fftLeft[i] + _fftRight[i]) * 0.5);
+      final side = List.generate(32, (i) =>
+          (_fftLeft[i] - _fftRight[i]).abs() * 0.5);
 
-    // FFT Texturen bauen
-    _texLeft  = await _buildFFTTexture(_fftLeft);
-    _texRight = await _buildFFTTexture(_fftRight);
-    _texMid   = await _buildFFTTexture(mid);
-    _texSide  = await _buildFFTTexture(side);
+      _texLeft  = await _buildFFTTexture(_fftLeft);
+      _texRight = await _buildFFTTexture(_fftRight);
+      _texMid   = await _buildFFTTexture(mid);
+      _texSide  = await _buildFFTTexture(side);
 
-    setState(() {
-      _shader = program.fragmentShader();
-      _loaded = true;
-    });
+      setState(() {
+        _shader = program.fragmentShader();
+        _loaded = true;
+      });
 
-    _ticker = createTicker((elapsed) {
-      setState(() => _time = elapsed.inMilliseconds / 1000.0);
-    });
-    _ticker!.start();
+      _ticker = createTicker((elapsed) {
+        setState(() => _time = elapsed.inMilliseconds / 1000.0);
+      });
+      _ticker!.start();
+    } catch (e) {
+      setState(() => _error = e.toString());
+      debugPrint('Shader error: $e');
+    }
   }
 
   @override
@@ -94,7 +95,16 @@ class _ShaderCanvasState extends State<ShaderCanvas>
 
   @override
   Widget build(BuildContext context) {
-    if (!_loaded || _shader == null) return const SizedBox.expand();
+    if (_error != null) {
+      return Center(
+        child: Text('Shader Error: $_error',
+          style: const TextStyle(color: Colors.red, fontSize: 12)),
+      );
+    }
+    if (!_loaded || _shader == null ||
+        _texLeft == null || _texRight == null) {
+      return const SizedBox.expand();
+    }
     return CustomPaint(
       painter: _ShaderPainter(
         shader:   _shader!,
@@ -128,36 +138,31 @@ class _ShaderPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    int tidx = 0;
-    int fidx  = 0;
+    // Texturen (müssen zuerst gesetzt werden)
+    shader.setImageSampler(0, texLeft);
+    shader.setImageSampler(1, texRight);
+    shader.setImageSampler(2, texMid);
+    shader.setImageSampler(3, texSide);
 
-    // Texturen (sampler2D)
-    shader.setImageSampler(tidx++, texLeft);
-    shader.setImageSampler(tidx++, texRight);
-    shader.setImageSampler(tidx++, texMid);
-    shader.setImageSampler(tidx++, texSide);
-
-    // Skalare Uniforms
-    shader.setFloat(fidx++, time);
-    shader.setFloat(fidx++, size.width);
-    shader.setFloat(fidx++, size.height);
-    shader.setFloat(fidx++, 0.6);   // bass_left
-    shader.setFloat(fidx++, 0.5);   // bass_right
-    shader.setFloat(fidx++, 0.5);   // energy
-    shader.setFloat(fidx++, 128.0); // bpm
-    shader.setFloat(fidx++, (time * 2.0) % 1.0); // beat_phase
-    shader.setFloat(fidx++, 0.0);   // beat_onset
-    shader.setFloat(fidx++, 0.75);  // stereo_width
-    shader.setFloat(fidx++, 1.2);   // zoom
-    shader.setFloat(fidx++, 0.5);   // rotation
-    shader.setFloat(fidx++, 0.1);   // warp_x
-    shader.setFloat(fidx++, 0.1);   // warp_y
-    shader.setFloat(fidx++, 0.5);   // param0
-    shader.setFloat(fidx++, 0.5);   // param1
-    shader.setFloat(fidx++, 0.5);   // param2
-    shader.setFloat(fidx++, 0.5);   // param8
-    shader.setFloat(fidx++, 0.3);   // param9
-    shader.setFloat(fidx++, 0.8);   // param11
+    // Floats – exakt in der Reihenfolge wie im Shader deklariert
+    int f = 0;
+    shader.setFloat(f++, time);
+    shader.setFloat(f++, size.width);
+    shader.setFloat(f++, size.height);
+    shader.setFloat(f++, 0.6);                    // u_bass_left
+    shader.setFloat(f++, 0.5);                    // u_bass_right
+    shader.setFloat(f++, 0.6);                    // u_energy
+    shader.setFloat(f++, 128.0);                  // u_bpm
+    shader.setFloat(f++, (time * 2.0) % 1.0);    // u_beat_phase
+    shader.setFloat(f++, 0.0);                    // u_beat_onset
+    shader.setFloat(f++, 0.75);                   // u_stereo_width
+    shader.setFloat(f++, 1.2);                    // u_zoom
+    shader.setFloat(f++, 0.3);                    // u_rotation
+    shader.setFloat(f++, 0.1);                    // u_warp_x
+    shader.setFloat(f++, 0.1);                    // u_warp_y
+    shader.setFloat(f++, 0.4);                    // u_param8
+    shader.setFloat(f++, 0.3);                    // u_param9
+    shader.setFloat(f++, 0.8);                    // u_param11
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
