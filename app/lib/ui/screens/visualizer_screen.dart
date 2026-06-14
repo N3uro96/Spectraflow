@@ -6,6 +6,7 @@ import '../../core/audio_data_provider.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/shader_canvas.dart';
+import '../widgets/fft_display.dart';
 
 class VisualizerScreen extends StatefulWidget {
   const VisualizerScreen({super.key});
@@ -41,12 +42,13 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
       backgroundColor: SFTheme.background,
       body: Stack(
         children: [
-          // ── Shader mit echten Audio Daten ──
-          Positioned.fill(
-            child: ShaderCanvas(audioData: audioData),
-          ),
+          // Shader Hintergrund
+          Positioned.fill(child: ShaderCanvas(audioData: audioData)),
 
-          // ── UI Overlay ──
+          // FFT Bänder + Stereo Meter (Canvas, kein Shader)
+          Positioned.fill(child: FFTDisplay(audioData: audioData)),
+
+          // UI Overlay
           SafeArea(
             child: Column(
               children: [
@@ -75,7 +77,8 @@ class _VisualizerScreenState extends State<VisualizerScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             borderRadius: SFTheme.radiusSm,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('${data.bpm.toStringAsFixed(0)}', style: SFTheme.titleMedium),
+              Text('${data.bpm.toStringAsFixed(0)}',
+                  style: SFTheme.titleMedium),
               const SizedBox(width: 4),
               Text('BPM', style: SFTheme.labelSmall),
             ]),

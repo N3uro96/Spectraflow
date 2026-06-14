@@ -34,8 +34,7 @@ class _ShaderCanvasState extends State<ShaderCanvas>
   Future<void> _loadShader() async {
     try {
       final program = await ui.FragmentProgram.fromAsset(
-        'lib/shaders/test_shader.frag',
-      );
+          'lib/shaders/test_shader.frag');
       setState(() {
         _shader = program.fragmentShader();
         _loaded = true;
@@ -46,41 +45,30 @@ class _ShaderCanvasState extends State<ShaderCanvas>
       _ticker!.start();
     } catch (e) {
       setState(() => _error = e.toString());
-      debugPrint('Shader error: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
-      return Center(child: Text('Shader Error:\n$_error',
+      return Center(child: Text('Shader: $_error',
           style: const TextStyle(color: Colors.red, fontSize: 10)));
     }
     if (!_loaded || _shader == null) return const SizedBox.expand();
 
-    final audio = widget.audioData;
-    if (!audio.texturesReady ||
-        audio.texLeft  == null ||
-        audio.texRight == null ||
-        audio.texMid   == null ||
-        audio.texSide  == null) {
-      return const SizedBox.expand();
-    }
+    final a = widget.audioData;
 
     return CustomPaint(
       painter: _ShaderPainter(
         shader:    _shader!,
         time:      _time,
-        texLeft:   audio.texLeft!,
-        texRight:  audio.texRight!,
-        texMid:    audio.texMid!,
-        texSide:   audio.texSide!,
-        bassLeft:  audio.bassLeft,
-        bassRight: audio.bassRight,
-        energy:    audio.energy,
-        bpm:       audio.bpm,
-        beatPhase: audio.beatPhase,
-        stereo:    audio.stereoWidth,
+        bass:      a.bassLeft.clamp(0.0, 1.0),
+        mid:       a.midLeft.clamp(0.0, 1.0),
+        high:      a.highLeft.clamp(0.0, 1.0),
+        energy:    a.energy.clamp(0.0, 1.0),
+        bpm:       a.bpm.clamp(60.0, 200.0),
+        beatPhase: a.beatPhase.clamp(0.0, 1.0),
+        stereo:    a.stereoWidth.clamp(0.0, 1.0),
       ),
       size: Size.infinite,
     );
@@ -89,20 +77,14 @@ class _ShaderCanvasState extends State<ShaderCanvas>
 
 class _ShaderPainter extends CustomPainter {
   final ui.FragmentShader shader;
-  final double            time;
-  final ui.Image          texLeft, texRight, texMid, texSide;
-  final double            bassLeft, bassRight, energy;
-  final double            bpm, beatPhase, stereo;
+  final double time, bass, mid, high, energy, bpm, beatPhase, stereo;
 
   _ShaderPainter({
     required this.shader,
     required this.time,
-    required this.texLeft,
-    required this.texRight,
-    required this.texMid,
-    required this.texSide,
-    required this.bassLeft,
-    required this.bassRight,
+    required this.bass,
+    required this.mid,
+    required this.high,
     required this.energy,
     required this.bpm,
     required this.beatPhase,
@@ -111,29 +93,18 @@ class _ShaderPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    shader.setImageSampler(0, texLeft);
-    shader.setImageSampler(1, texRight);
-    shader.setImageSampler(2, texMid);
-    shader.setImageSampler(3, texSide);
-
     int f = 0;
     shader.setFloat(f++, time);
     shader.setFloat(f++, size.width);
     shader.setFloat(f++, size.height);
-    shader.setFloat(f++, bassLeft.clamp(0.0, 1.0));
-    shader.setFloat(f++, bassRight.clamp(0.0, 1.0));
-    shader.setFloat(f++, energy.clamp(0.0, 1.0));
-    shader.setFloat(f++, bpm.clamp(60.0, 200.0));
-    shader.setFloat(f++, beatPhase.clamp(0.0, 1.0));
-    shader.setFloat(f++, 0.0);
-    shader.setFloat(f++, stereo.clamp(0.0, 1.0));
-    shader.setFloat(f++, 1.2);
-    shader.setFloat(f++, 0.3);
-    shader.setFloat(f++, 0.1);
-    shader.setFloat(f++, 0.1);
-    shader.setFloat(f++, 0.4);
-    shader.setFloat(f++, 0.3);
-    shader.setFloat(f++, 0.8);
+    shader.setFloat(f++, bass);
+    shader.setFloat(f++, mid);
+    shader.setFloat(f++, high);
+    shader.setFloat(f++, energy);
+    shader.setFloat(f++, bpm);
+    shader.setFloat(f++, beatPhase);
+    shader.setFloat(f++, 0.0); // beat_onset
+    shader.setFloat(f++, stereo);
 
     canvas.drawRect(
       Rect.fromLTWH(0, 0, size.width, size.height),
