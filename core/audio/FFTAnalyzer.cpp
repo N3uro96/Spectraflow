@@ -5,6 +5,7 @@
 static constexpr float PI = 3.14159265358979323846f;
 
 FFTAnalyzer::FFTAnalyzer()
+    : in_buf_(FFT_SIZE), out_buf_(FFT_SIZE) // Speicher 1x beim Start reservieren
 {
     cfg_ = kiss_fft_alloc(FFT_SIZE, 0, nullptr, nullptr);
     for (size_t i = 0; i < FFT_SIZE; i++)
@@ -37,8 +38,10 @@ void FFTAnalyzer::process(const float* left, const float* right,
     compute_fft(left,  out.fft_left.data());
     compute_fft(right, out.fft_right.data());
     compute_mid_side(out);
-    apply_envelope(out.env_left.data(),  out.fft_left.data(),  attack_ms_, release_ms_);
-    apply_envelope(out.env_right.data(), out.fft_right.data(), attack_ms_, release_ms_);
+    
+    // num_samples an die Envelope-Funktion übergeben für korrekte Framerate
+    apply_envelope(out.env_left.data(),  out.fft_left.data(),  attack_ms_, release_ms_, num_samples);
+    apply_envelope(out.env_right.data(), out.fft_right.data(), attack_ms_, release_ms_, num_samples);
 
     float side_energy = 0.0f, mid_energy = 0.0f;
     for (size_t i = 0; i < NUM_BANDS; i++) {
@@ -52,9 +55,9 @@ void FFTAnalyzer::process(const float* left, const float* right,
     out.mid_left  = out.mid_right  = 0.0f;
     out.high_left = out.high_right = 0.0f;
 
-    for (int i = 0;  i < 8;  i++) { out.bass_left += out.env_left[i];  out.bass_right += out.env_right[i]; }
-    for (int i = 8;  i < 20; i++) { out.mid_left  += out.env_left[i];  out.mid_right  += out.env_right[i]; }
-    for (int i = 20; i < 32; i++) { out.high_left += out.env_left[i];  out.high_right += out.env_right[i]; }
+    for (int i = 0;  i < 8;  i++) { out.bass_left += out.env_left[i]; out.bass_right += out.env_right[i]; }
+    for (int i = 8;  i < 20; i++) { out.mid_left  += out.env_left[i]; out.mid_right  += out.env_right[i]; }
+    for (int i = 20; i < 32; i++) { out.high_left += out.env_left[i]; out.high_right += out.env_right[i]; }
 
     out.bass_left /= 8.0f;  out.bass_right /= 8.0f;
     out.mid_left  /= 12.0f; out.mid_right  /= 12.0f;
@@ -68,54 +71,28 @@ void FFTAnalyzer::process(const float* left, const float* right,
 
 void FFTAnalyzer::compute_fft(const float* samples, float* bands_out)
 {
-    std::vector<kiss_fft_cpx> in_buf(FFT_SIZE);
-    std::vector<kiss_fft_cpx> out_buf(FFT_SIZE);
-
+    // Die Vektoren werden hier jetzt nicht mehr neu erstellt!
+    
     for (size_t i = 0; i < FFT_SIZE; i++) {
-        in_buf[i].r = samples[i] * hanning_window_[i];
-        in_buf[i].i = 0.0f;
+        in_buf_[i].r = samples[i] * hanning_window_[i];
+        in_buf_[i].i = 0.0f;
     }
-    kiss_fft(cfg_, in_buf.data(), out_buf.data());
-
-    // ── Pass 1: Rohe Band-Energie berechnen ──
-    float raw[NUM_BANDS];
-    float peak = 1e-6f;
-
+    
+    kiss_fft(cfg_, in_buf_.data(), out_buf_.data());
+    
     for (size_t b = 0; b < NUM_BANDS; b++) {
         int   start  = band_limits_[b];
-        int   end    = std::max(start + 1, band_limits_[b + 1]);
-        float energy = 0.0f;
-        int   count  = 0;
-
-        for (int bin = start; bin < end && bin < (int)(FFT_SIZE / 2); bin++) {
-            float r  = out_buf[bin].r;
-            float im = out_buf[bin].i;
-            energy += std::sqrt(r * r + im * im);
-            count++;
+        int   end    = band_limits_[b + 1];
+        float max_mag = 0.0f; // Wir suchen den stärksten Peak im Band
+        
+        for (int bin = start; bin < end; bin++) {
+            float r = out_buf_[bin].r, im = out_buf_[bin].i;
+            float mag = std::sqrt(r * r + im * im);
+            if (mag > max_mag) max_mag = mag; // Peak speichern
         }
-
-        raw[b] = (count > 0) ? energy / (float)count : 0.0f;
-        if (raw[b] > peak) peak = raw[b];
-    }
-
-    // ── Auto-Gain: Peak tracken ──
-    // Wähle den richtigen Peak-Tracker basierend auf Kanal
-    // (beide Kanäle teilen den Peak-Tracker hier, wird in process() getrennt)
-    float& peak_tracker = (bands_out == nullptr) ? peak_left_ : peak_left_;
-
-    // Fast Attack: sofort auf hohen Peak reagieren
-    if (peak > peak_tracker) {
-        peak_tracker = peak;
-    } else {
-        // Slow Release: langsam abfallen (ca. 3 Sekunden)
-        peak_tracker = peak_tracker * 0.998f + peak * 0.002f;
-    }
-    peak_tracker = std::max(peak_tracker, 1e-6f);
-
-    // ── Pass 2: Normalisieren ──
-    // 0.8f damit die Balken nicht immer auf Maximum klemmen
-    for (size_t b = 0; b < NUM_BANDS; b++) {
-        bands_out[b] = std::min(1.0f, (raw[b] / peak_tracker) * 0.85f);
+        
+        // Punchy Scaling: (FFT_SIZE * 0.125f) für Headroom
+        bands_out[b] = std::min(1.0f, max_mag / (FFT_SIZE * 0.125f));
     }
 }
 
@@ -128,10 +105,14 @@ void FFTAnalyzer::compute_mid_side(AudioData& data)
 }
 
 void FFTAnalyzer::apply_envelope(float* envelope, const float* bands,
-                                  float attack_ms, float release_ms)
+                                  float attack_ms, float release_ms, size_t num_samples)
 {
-    const float ac = 1.0f - std::exp(-1.0f / (attack_ms  * 0.001f * sample_rate_));
-    const float rc = 1.0f - std::exp(-1.0f / (release_ms * 0.001f * sample_rate_));
+    // Berechne die tatsächliche Framerate
+    float frame_rate = sample_rate_ / static_cast<float>(num_samples > 0 ? num_samples : 2048);
+    
+    const float ac = 1.0f - std::exp(-1.0f / (attack_ms  * 0.001f * frame_rate));
+    const float rc = 1.0f - std::exp(-1.0f / (release_ms * 0.001f * frame_rate));
+    
     for (size_t i = 0; i < NUM_BANDS; i++) {
         float prev  = envelope[i];
         envelope[i] = prev + (bands[i] > prev ? ac : rc) * (bands[i] - prev);
