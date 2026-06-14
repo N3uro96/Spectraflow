@@ -17,13 +17,9 @@ void AudioEngine::feed(const float* left, const float* right, size_t num_samples
     if (!running_.load()) return;
     AudioData data{};
 
-    // 1. FFT Analyse
     fft_->process(left, right, num_samples, data);
+    normalizer_->process(data);
 
-    // 2. Normalizer DEAKTIVIERT zum Testen
-    // normalizer_->process(data);
-
-    // 3. BPM + Beat
     float bpm = 120.0f; bool beat = false; float phase = 0.0f;
     bpm_->process(data, bpm, beat, phase);
 
