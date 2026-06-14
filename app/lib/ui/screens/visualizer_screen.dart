@@ -1,9 +1,10 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import '../../core/audio_manager.dart';
 import '../../core/audio_data_provider.dart';
+import '../../core/seed_manager.dart';
+import '../../core/dna_generator.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/visualizer_widget.dart';
@@ -15,12 +16,16 @@ class VisualizerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final audio     = context.watch<AudioManager>();
     final audioData = context.read<AudioDataProvider>();
+    final seeds     = context.watch<SeedManager>();
+    final dna       = DNAGenerator.generate(seeds.currentSeed);
 
     return Scaffold(
       backgroundColor: SFTheme.background,
       body: Stack(
         children: [
-          Positioned.fill(child: VisualizerWidget(audioData: audioData)),
+          Positioned.fill(
+            child: VisualizerWidget(audioData: audioData, dna: dna),
+          ),
           SafeArea(
             child: Column(
               children: [
@@ -128,7 +133,6 @@ class _BottomPanel extends StatefulWidget {
 
 class _BottomPanelState extends State<_BottomPanel> {
   int _paletteIndex = 0;
-  int _currentSeed  = 0;
 
   final List<Color> _paletteColors = [
     const Color(0xFF6C63FF), const Color(0xFFFF6584),
@@ -137,19 +141,9 @@ class _BottomPanelState extends State<_BottomPanel> {
   ];
 
   @override
-  void initState() {
-    super.initState();
-    _currentSeed = Random().nextInt(999999);
-  }
-
-  void _randomizeSeed() {
-    setState(() {
-      _currentSeed = Random().nextInt(999999);
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final seeds = context.watch<SeedManager>();
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: GlassContainer(
@@ -168,7 +162,7 @@ class _BottomPanelState extends State<_BottomPanel> {
                     Text('SEED', style: SFTheme.labelSmall),
                     const SizedBox(height: 4),
                     Text(
-                      '#$_currentSeed',
+                      '#${seeds.currentSeed}',
                       style: SFTheme.titleMedium.copyWith(
                         fontFamily: 'monospace',
                         letterSpacing: 2,
@@ -176,9 +170,8 @@ class _BottomPanelState extends State<_BottomPanel> {
                     ),
                   ],
                 ),
-                // Würfel Button
                 GestureDetector(
-                  onTap: _randomizeSeed,
+                  onTap: () => context.read<SeedManager>().randomize(),
                   child: GlassContainer(
                     padding: const EdgeInsets.all(14),
                     borderRadius: SFTheme.radiusSm,
