@@ -27,3 +27,4 @@ flutter:
     - lib/shaders/smoke.frag
     - lib/shaders/tunnel.frag
     - lib/shaders/plasma.frag
+    - lib/shaders/particles.frag
