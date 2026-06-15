@@ -28,7 +28,6 @@ out vec4 fragColor;
 const float PI  = 3.14159265359;
 const float TAU = 6.28318530718;
 
-// ── DETERMINISTISCHER HASH ────────────────────────────────
 float ph(float id, float salt) {
     return fract(sin(id * 127.1 + salt * 311.7 + u_seed * 0.123) * 43758.5453);
 }
@@ -39,55 +38,39 @@ float dna(float salt) {
 
 vec3 pal(float t) {
     t = clamp(t, 0.0, 1.0);
-    if (t < 0.333) return mix(u_pal_shadow,   u_pal_low,       t * 3.0);
-    if (t < 0.667) return mix(u_pal_low,        u_pal_high,      (t - 0.333) * 3.0);
-    return               mix(u_pal_high,       u_pal_highlight, (t - 0.667) * 3.0);
+    if (t < 0.333) return mix(u_pal_shadow,  u_pal_low,       t * 3.0);
+    if (t < 0.667) return mix(u_pal_low,      u_pal_high,      (t - 0.333) * 3.0);
+    return               mix(u_pal_high,      u_pal_highlight, (t - 0.667) * 3.0);
 }
 
 mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
-// ── OPTIMIERTE PARTIKEL-SHAPES (Branchless / Ohne If-Statements) ──
-float get_shape_contribution(vec2 d, float type, float sz, vec2 vd) {
+// ── EINE Partikelform pro Session ──────────────────────────
+// d_type ist uniform (für alle Fragmente gleich), daher ist diese
+// if/else-Kette eine uniforme Verzweigung -> keine Warp-Divergenz,
+// es wird nur EINE Form berechnet (statt vorher alle 8).
+float shape_of(vec2 d, float sz, float type, vec2 vd) {
     float r = length(d) / max(sz, 0.001);
-    
-    // Wir berechnen die mathematischen Grundformen parallel und blenden via step()
-    float shape0 = exp(-r * r * 4.0); // Gauss Dot
-    
-    float cx = exp(-(d.y/sz)*(d.y/sz) * 24.0) * exp(-(d.x/sz)*(d.x/sz) * 0.5);
-    float cy = exp(-(d.x/sz)*(d.x/sz) * 24.0) * exp(-(d.y/sz)*(d.y/sz) * 0.5);
-    float shape1 = max(cx, cy) + shape0 * 0.5; // Stern / Kreuz
-    
-    vec2 vp = vec2(-vd.y, vd.x);
-    float shape2 = exp(-(pow(dot(d, vd)/(sz*2.5), 2.0) + pow(dot(d, vp)/(sz*0.3), 2.0)) * 2.0); // Kometen-Linie
-    
-    float shape3 = exp(-pow(r - 0.65, 2.0) * 35.0); // Ring
-    
-    float v = max(0.0, 1.0 - r * r);
-    float shape4 = v * v * v * 1.5; // Organischer Blob
-    
-    float sq = max(abs(d.x), abs(d.y)) / sz;
-    float shape5 = smoothstep(0.85, 0.70, sq); // Cyber-Pixel
-    
-    float along_b = max(0.0, dot(d, -vd)) / sz;
-    float perp = length(d - dot(d, vd) * vd) / sz;
-    float shape6 = exp(-along_b * 1.5 - perp * perp * 20.0); // Funken-Schweif
-    
-    float ha = mod(atan(d.y, d.x), PI / 3.0);
-    float arm = 1.0 - min(ha, PI / 3.0 - ha) / (PI / 6.0);
-    float shape7 = exp(-r * r * 2.0) * (0.1 + arm * 3.0 * exp(-r * r * 10.0)); // Kristall
 
-    // Branchless Selection: Spart GPU-Zyklen gegenüber harten If-Slices
-    float c = 0.0;
-    c += shape0 * step(0.0, type) * step(type, 0.5);
-    c += shape1 * step(0.5, type) * step(type, 1.5);
-    c += shape2 * step(1.5, type) * step(type, 2.5);
-    c += shape3 * step(2.5, type) * step(type, 3.5);
-    c += shape4 * step(3.5, type) * step(type, 4.5);
-    c += shape5 * step(4.5, type) * step(type, 5.5);
-    c += shape6 * step(5.5, type) * step(type, 6.5);
-    c += shape7 * step(6.5, type);
-    
-    return c;
+    if (type < 0.5) {
+        // Weicher Glow-Punkt
+        return exp(-r * r * 4.0);
+    } else if (type < 1.5) {
+        // Ring / Halo
+        return exp(-pow(r - 0.6, 2.0) * 30.0) + exp(-r * r * 6.0) * 0.3;
+    } else if (type < 2.5) {
+        // Kometen-Schweif entlang der Flugrichtung
+        vec2 vp = vec2(-vd.y, vd.x);
+        float along = dot(d, -vd) / sz;
+        float perp  = dot(d, vp) / sz;
+        return exp(-max(along, 0.0) * 1.8 - perp * perp * 22.0)
+             + exp(-r * r * 8.0) * 0.4;
+    } else {
+        // Funkelnder Kristall / Stern
+        float core = exp(-r * r * 3.0);
+        float arms = exp(-r * r * 14.0) * (1.0 + cos(atan(d.y, d.x) * 6.0) * 0.8);
+        return core * 0.4 + arms;
+    }
 }
 
 void main() {
@@ -95,140 +78,115 @@ void main() {
     vec2 res = vec2(u_width, u_height);
     float asp = u_width / u_height;
 
-    // ── GENETISCHER CODE (Zufall über Seed) ──────────────────
-    float d_type_a    = floor(dna(1.0) * 8.0);          // Primärer Typ (0-7)
-    float d_type_b    = floor(dna(2.0) * 8.0);          // Sekundärer Typ (0-7)
-    float d_count     = floor(dna(3.0) * 33.0) + 32.0;  // 32-64 Partikel
-    float d_scale     = dna(4.0) * 0.5 + 0.3;           // System-Größe
-    float d_behavior  = floor(dna(5.0) * 3.0);          // 0=Orbit, 1=Chaos-Explosion, 2=DNA-Doppelhelix
-    float d_speed     = dna(6.0) * 1.2 + 0.5;           // Grundgeschwindigkeit
-    float d_size      = dna(7.0) * 0.03 + 0.02;         // Partikelgröße
-    float d_clrdrift  = dna(8.0) * 0.4 + 0.1;           // Farbänderung
-    float d_z_range   = dna(9.0) * 1.5 + 0.5;           // Tiefenschärfe-Bereich
+    // ── GENETIK ────────────────────────────────────────────
+    float d_type     = floor(dna(1.0) * 4.0);          // EINE Form für alle
+    float d_behavior = floor(dna(2.0) * 3.0);          // 0=Bahnen 1=Lissajous 2=Spiralgalaxie
+    float d_count    = floor(dna(3.0) * 17.0) + 22.0;  // 22-38 Partikel
+    float d_scale    = dna(4.0) * 0.4 + 0.45;          // System-Größe
+    float d_speed    = dna(5.0) * 0.8 + 0.4;           // Grundtempo
+    float d_size     = dna(6.0) * 0.025 + 0.02;        // Partikelgröße
+    float d_clrdrift = dna(7.0) * 0.4 + 0.1;
+    float d_swirl    = (dna(8.0) - 0.5) * 2.0;         // Drehsinn
 
-    // ── BEAT-DYNAMIK ───────────────────────────────────────
-    // Takt-synchrone Phasensteuerung über BPM
-    float beat_time = u_time * (max(u_bpm, 60.0) / 60.0);
-    float beat_pulse = exp(-fract(beat_time) * 4.0) * u_bass; // Knackiger Kontroll-Impuls
-    
-    float speed_mod = 1.0 + u_energy * 2.0;
-    float stereo_push = u_stereo * 0.35; // Versatz basierend auf Balance
+    // ── BEAT & AUDIO ───────────────────────────────────────
+    float beat_time  = u_time * (max(u_bpm, 60.0) / 60.0);
+    float beat_pulse = exp(-fract(beat_time) * 4.0) * u_bass;
+    float speed_mod  = 1.0 + u_energy * 1.5;
+    float stereo_push = (u_bass_left - u_bass_right) * 0.25;
 
-    // Fragment-Setup
     vec2 uv_raw = fc / res;
     vec2 fp = (uv_raw - 0.5) * vec2(asp, 1.0) * 2.0;
 
-    vec3 accumulation = vec3(0.0);
+    vec3 accum = vec3(0.0);
 
     // ── PARTIKEL-SCHLEIFE ──────────────────────────────────
-    for (int i = 0; i < 64; i++) {
+    for (int i = 0; i < 40; i++) {
         if (float(i) >= d_count) break;
         float id = float(i);
 
-        // Individuelle Genetik pro Partikel
-        float p_radius  = (ph(id, 1.0) * 0.6 + 0.2) * d_scale;
-        float p_speed   = (ph(id, 2.0) - 0.5) * 2.0 * d_speed;
-        float p_phase   = ph(id, 3.0) * TAU;
-        float z_base    = ph(id, 4.0) * d_z_range + 0.4;
-        float p_hue     = ph(id, 5.0);
-        float p_sz_mod  = ph(id, 6.0) * 0.5 + 0.7;
-        float p_select  = ph(id, 7.0) > 0.65 ? d_type_b : d_type_a;
+        float p_phase = ph(id, 1.0) * TAU;
+        float p_rad   = (ph(id, 2.0) * 0.7 + 0.3) * d_scale;
+        float p_spd   = (ph(id, 3.0) * 0.7 + 0.5) * d_speed;
+        float z_base  = ph(id, 4.0) * 1.4 + 0.5;
+        float p_hue   = ph(id, 5.0);
+        float p_szmod = ph(id, 6.0) * 0.5 + 0.7;
 
-        // Kinematik-Modul (Verhalten aus Seed bestimmt)
+        float t = u_time * p_spd * speed_mod;
         vec3 pos = vec3(0.0);
-        float t_animated = u_time * p_speed * speed_mod;
 
         if (d_behavior < 0.5) {
-            // Verhalten 0: Strukturierter 3D-Orbit
-            pos.x = sin(t_animated + p_phase) * p_radius;
-            pos.y = cos(t_animated + p_phase) * p_radius * 0.8;
-            pos.z = z_base + sin(t_animated * 0.5) * 0.3;
-            // Beat pumpen: Radius weitet sich im Takt
-            pos.xy *= (1.0 + beat_pulse * 0.25);
-        } 
-        else if (d_behavior < 1.5) {
-            // Verhalten 1: Regenerative Chaos-Explosion
-            float lifetime = fract(t_animated * 0.2 + p_phase);
-            float explode_speed = p_radius * 2.0;
-            vec2 dir = vec2(sin(p_phase), cos(p_phase));
-            pos.xy = dir * lifetime * explode_speed;
-            pos.z = z_base * (1.0 - lifetime * 0.5);
-            // Reagiert auf Mids bei der Expansion
-            pos.xy += dir * u_mid * 0.15;
-        } 
-        else {
-            // Verhalten 2: Audioreaktiver Doppelhelix-Vortex
-            float angle = t_animated + id * 0.2;
-            pos.x = sin(angle) * (p_radius * 0.4 + u_bass * 0.1);
-            pos.y = (ph(id, 8.0) - 0.5) * 2.0 + fract(t_animated * 0.1); // Wandert vertikal
-            if(pos.y > 1.0) pos.y -= 2.0;
-            pos.z = z_base + cos(angle) * 0.2;
+            // Verhalten 0: gleitende, geschachtelte Bahnen (sanfte Ringe)
+            float ang = t * d_swirl + p_phase;
+            pos.x = cos(ang) * p_rad;
+            pos.y = sin(ang) * p_rad;
+            // langsames Vor-/Zurückgleiten in der Tiefe
+            pos.z = z_base + sin(t * 0.4 + p_phase) * 0.35;
+            pos.xy *= 1.0 + beat_pulse * 0.18;
+        } else if (d_behavior < 1.5) {
+            // Verhalten 1: anmutige Lissajous-Figuren (sich kreuzende Achten)
+            float fx = 2.0 + floor(ph(id, 7.0) * 3.0);
+            float fy = 3.0 + floor(ph(id, 8.0) * 3.0);
+            pos.x = sin(t * 0.7 + p_phase) * p_rad * 1.1;
+            pos.y = sin(t * 0.7 * (fy / fx) + p_phase * 1.3) * p_rad * 1.1;
+            pos.z = z_base + cos(t * 0.5) * 0.25;
+        } else {
+            // Verhalten 2: Spiralgalaxie – sanftes Ein-/Auswärtsströmen
+            float life = fract(t * 0.12 + p_phase);
+            float spiral = life * 6.0 * d_swirl + p_phase + t * 0.2;
+            float rad = mix(0.05, p_rad * 1.6, life);
+            pos.x = cos(spiral) * rad;
+            pos.y = sin(spiral) * rad;
+            pos.z = z_base + life * 0.4;
         }
 
-        // Stereo & Audio-Offsets aufprägen
+        // Stereo & feine Audio-Auslenkung
         pos.x += stereo_push;
-        pos.x += sin(u_time * 2.0 + p_phase) * u_mid * 0.08; // Mid-Wackeln
-        pos.y += cos(u_time * 1.5 + p_phase) * u_high * 0.05; // High-Zittern
+        pos.x += sin(u_time * 1.8 + p_phase) * u_mid * 0.06;
+        pos.y += cos(u_time * 1.4 + p_phase) * u_high * 0.04;
 
-        // 3D-Projektion auf den Bildschirm
+        // 3D-Projektion
         float z_safe = max(pos.z, 0.1);
         vec2 screen_pos = pos.xy / z_safe;
-        float current_sz = d_size * p_sz_mod / z_safe;
+        float sz = d_size * p_szmod / z_safe;
 
-        // Distanz-Check für Performance-Schonung
+        // Distanz-Cull
         vec2 dvec = fp - screen_pos;
-        if (length(dvec) > current_sz * 4.0) continue;
+        if (dot(dvec, dvec) > (sz * 4.5) * (sz * 4.5)) continue;
 
-        // Bewegungsvektor für Richtungs-Shapes (Komet, Linie)
-        vec2 vd = normalize(vec2(-sin(t_animated + p_phase), cos(t_animated + p_phase)) + vec2(0.0001, 0.0));
+        // Flugrichtung (für Kometen-Form)
+        vec2 vd = normalize(screen_pos - fp + vec2(0.0001));
 
-        // Berechne Form-Beitrag
-        float intensity = get_shape_contribution(dvec, p_select, current_sz, vd);
-        if (intensity < 0.005) continue;
+        float intensity = shape_of(dvec, sz, d_type, vd);
+        if (intensity < 0.004) continue;
 
-        // Farb-Pipeline
-        float depth_gradient = 1.0 - clamp(pos.z / (d_z_range + 0.4), 0.0, 1.0);
-        float color_coord = fract(p_hue + depth_gradient * 0.3 + u_time * d_clrdrift * 0.05);
-        vec3 p_color = pal(color_coord);
+        float depth_grad = 1.0 - clamp(pos.z / 2.0, 0.0, 1.0);
+        float ct = fract(p_hue + depth_grad * 0.3 + u_time * d_clrdrift * 0.05);
+        vec3 pcol = pal(ct);
 
-        // Licht-Sättigung berechnen (Nähe bringt Helligkeit, Bass flasht auf)
-        float brightness = (1.2 / z_safe) * (0.7 + u_energy * 0.5 + beat_pulse * 0.8);
-        accumulation += p_color * intensity * brightness;
+        float bright = (1.1 / z_safe) * (0.7 + u_energy * 0.5 + beat_pulse * 0.8);
+        accum += pcol * intensity * bright;
     }
 
-    // Grund-Farbton
-    vec3 col = u_pal_shadow * 0.03 + accumulation;
-
-    // High-Frequenzen: Subtiles Sternenglimmern im fernen Hintergrund
-    float stars = max(0.0, sin(fp.x * 120.0) * cos(fp.y * 120.0));
-    col += u_pal_highlight * pow(stars, 4.0) * u_high * 0.15;
+    vec3 col = u_pal_shadow * 0.04 + accum;
 
     // Vignette
-    float vig = 1.0 - smoothstep(0.4, 0.95, length(uv_raw - 0.5) * 2.0);
+    float vig = 1.0 - smoothstep(0.4, 0.98, length(uv_raw - 0.5) * 2.0);
     col *= vig;
 
-    // ── FEEDBACK STATE (Trails verarbeiten) ─────────────────
+    // ── FEEDBACK STATE ─────────────────────────────────────
     vec2 fb = uv_raw - 0.5;
     fb /= u_fb_zoom;
     fb = rot2(-u_fb_rotation) * fb;
-    
-    // Warp-Modulation getrieben durch Audio-Mids für dynamische Verflüssigung
     fb.x += sin(fb.y * 7.0 + u_time) * u_fb_warp_x * (0.4 + u_mid * 0.6);
     fb.y += cos(fb.x * 7.0 - u_time) * u_fb_warp_y * (0.4 + u_mid * 0.6);
     fb += 0.5;
 
-    // Boundary Protection für die Framebuffer-Textur
     vec2 edge_fade = smoothstep(0.0, 0.03, fb) * (1.0 - smoothstep(0.97, 1.0, fb));
-    float fade_factor = edge_fade.x * edge_fade.y;
-    
-    vec3 prev_frame_color = texture(u_prev_frame, clamp(fb, 0.001, 0.999)).rgb;
-    vec3 trails = prev_frame_color * u_fb_decay * fade_factor;
+    float fade = edge_fade.x * edge_fade.y;
 
-    // Weiches, additives Max-Blending verhindert Übersteuerung
-    col = max(col, trails * 0.92);
-    
-    // Tonemapping-Schutz vor Farbclipping
+    vec3 prev = texture(u_prev_frame, clamp(fb, 0.001, 0.999)).rgb;
+    col = max(col, prev * u_fb_decay * fade * 0.92);
+
     col = 1.0 - exp(-col);
-
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }

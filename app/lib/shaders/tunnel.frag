@@ -77,8 +77,9 @@ void main() {
     // ── 2. AUDIO & PERSPEKTIVE ─────────────────────────────
     
     // Stereo-Fluchtpunkt-Verschiebung
-    // Wir nutzen u_stereo direkt (angenommen -1 links, 1 rechts)
-    float perspective_shift = u_stereo * 0.5; 
+    // u_stereo ist 0..1, daher die Richtung aus der L/R-Bass-Balance ableiten.
+    // Bewusst sanft gehalten, damit der Fluchtpunkt nur leicht wandert.
+    float perspective_shift = (u_bass_left - u_bass_right) * 0.12;
     p.x -= perspective_shift;
 
     // Polarkoordinaten berechnen

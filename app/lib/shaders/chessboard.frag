@@ -122,8 +122,10 @@ void main() {
         float a = atan(p.y, p.x);
         
         // Bass drückt die Linse nach außen
-        float lens = r / (1.0 - r * (0.5 + local_bass * 0.3));
-        
+        // Nenner gegen 0/negativ absichern, sonst Inf/NaN -> schwarzer Frame
+        float denom = max(1.0 - r * (0.5 + local_bass * 0.3), 0.15);
+        float lens = r / denom;
+
         space.x = a / PI;
         space.y = log(lens + 0.1);
     }
@@ -207,12 +209,14 @@ void main() {
     col += u_pal_highlight * wireframe * u_high * 2.0;
     
     // Helligkeit basierend auf Audio der jeweiligen Kachel
-    col *= 0.5 + cell_audio + beat_kick * checker;
+    // Grund-Helligkeit angehoben, damit das Brett auch bei Stille sichtbar bleibt.
+    col *= 0.75 + cell_audio + beat_kick * checker;
 
     // Dunkler Nebel in der Ferne (Tiefenunschärfe)
-    // space.y ist in den meisten Topologien die Tiefe
-    float depth_fog = clamp(space.y / (d_density * 2.0), 0.0, 1.0);
-    col = mix(col, u_pal_shadow * 0.1, depth_fog);
+    // space.y wurde mit d_density multipliziert -> sehr groß; daher stark
+    // gedämpft und gedeckelt, sonst kippt der ganze Frame ins Schwarze.
+    float depth_fog = clamp(space.y / (d_density * 18.0), 0.0, 0.65);
+    col = mix(col, u_pal_shadow * 0.2, depth_fog);
 
     // Vignette
     float vig = smoothstep(1.3, 0.3, length(uv_raw - 0.5) * 2.0);

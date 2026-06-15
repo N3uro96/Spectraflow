@@ -28,9 +28,14 @@ out vec4 fragColor;
 const float PI  = 3.14159265359;
 const float TAU = 6.28318530718;
 
-// ── HILFSFUNKTIONEN ────────────────────────────────────────
 float dna(float salt) {
     return fract(sin(salt * 92.7463 + u_seed * 13.37) * 43758.5453);
+}
+
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
 }
 
 vec3 get_palette(float t) {
@@ -41,145 +46,150 @@ vec3 get_palette(float t) {
     return col;
 }
 
-mat2 rot2(float a) { 
-    float c = cos(a), s = sin(a); 
-    return mat2(c, -s, s, c); 
+mat2 rot2(float a) {
+    float c = cos(a), s = sin(a);
+    return mat2(c, -s, s, c);
 }
 
-// ── 8 MATHEMATISCHE GRUNDSTRUKTUREN (Branchless-Ansatz) ────
-float get_base_pattern(vec2 p, float style_id, float r, float a) {
-    // Style 0: Organische Wellenringe
-    float s0 = sin(r * 15.0 - u_time * 2.0) * cos(a * 4.0);
-    // Style 1: Scharfe Zahnräder
-    float s1 = smoothstep(0.4, 0.5, r + sin(a * 10.0) * 0.1);
-    // Style 2: Geometrisches Gitter
-    float s2 = sin(p.x * 20.0) * cos(p.y * 20.0);
-    // Style 3: Strahlende Sterne
-    float s3 = exp(-r * 3.0) * (1.0 + cos(a * 8.0) * 0.5);
-    // Style 4: Hypnotische Spirale
-    float s4 = sin(r * 25.0 - a * 3.0 - u_time * 3.0);
-    // Style 5: Fraktale Zellen (Voronoi-Style)
-    float s5 = abs(sin(r * 10.0) * sin(a * 5.0)) + abs(cos(r * 15.0));
-    // Style 6: Zickzack-Labyrinth
-    float s6 = abs(fract(r * 5.0 + a * 2.0) - 0.5) * 2.0;
-    // Style 7: Audio-Pulsar (stark frequenzabhängig)
-    float s7 = sin(r * (10.0 + u_mid * 20.0)) * cos(a * (2.0 + u_high * 10.0));
+// ── Komplexes, mehrschichtiges Grundmuster ─────────────────
+// Liefert ein dichtes Mandala-Feld. style_id wählt den Charakter,
+// die Schichten werden immer überlagert -> hohe visuelle Komplexität.
+float pattern_field(vec2 p, float style_id) {
+    float r = length(p);
+    float a = atan(p.y, p.x);
 
-    // Mischpult für die Styles
-    float c = 0.0;
-    c += s0 * step(0.0, style_id) * step(style_id, 0.5);
-    c += s1 * step(0.5, style_id) * step(style_id, 1.5);
-    c += s2 * step(1.5, style_id) * step(style_id, 2.5);
-    c += s3 * step(2.5, style_id) * step(style_id, 3.5);
-    c += s4 * step(3.5, style_id) * step(style_id, 4.5);
-    c += s5 * step(4.5, style_id) * step(style_id, 5.5);
-    c += s6 * step(5.5, style_id) * step(style_id, 6.5);
-    c += s7 * step(6.5, style_id);
-    
-    return c;
+    // Schicht A: konzentrische, audio-getriebene Wellenringe
+    float layA = sin(r * (18.0 + u_mid * 20.0) - u_time * 2.0);
+
+    // Schicht B: radiale Blütenblätter (Anzahl aus style)
+    float petals = 5.0 + floor(style_id) * 2.0;
+    float layB = sin(a * petals + sin(r * 6.0 - u_time) * 2.0);
+
+    // Schicht C: feines, gedrehtes Gitter (intrikate Textur)
+    vec2 gp = rot2(u_time * 0.1) * p * (10.0 + u_high * 14.0);
+    float layC = sin(gp.x) * sin(gp.y);
+
+    // Schicht D: hypnotische Spirale
+    float layD = sin(r * 22.0 - a * (3.0 + floor(style_id)) - u_time * 3.0);
+
+    // Schicht E: zellige Substruktur (Voronoi-artig, billig)
+    vec2 cell = floor(p * 8.0);
+    float layE = hash21(cell + floor(u_time));
+    layE = smoothstep(0.3, 0.9, layE) * exp(-r * 1.5);
+
+    // style_id mischt die Gewichte -> jeder Seed ein anderer Charakter
+    float w0 = 0.6 + 0.4 * sin(style_id * 1.7);
+    float w1 = 0.6 + 0.4 * cos(style_id * 2.3);
+    float w2 = 0.5 + 0.5 * sin(style_id * 3.1 + 1.0);
+
+    float field = layA * w0
+                + layB * w1 * 0.8
+                + layC * 0.4
+                + layD * w2 * 0.7
+                + layE * 1.2;
+
+    return field;
 }
 
 void main() {
     vec2 fc = FlutterFragCoord().xy;
     vec2 res = vec2(u_width, u_height);
     vec2 uv_raw = fc / res;
-    
-    // Aspektkorrigierte, zentrierte UVs
+
     vec2 uv = (fc - res * 0.5) / min(u_width, u_height);
 
-    // ── 1. GENETISCHER CODE (64 Shapes Matrix) ─────────────
-    // Generiert eine ID von 0 bis 63
-    float d_shape_id = floor(dna(1.0) * 64.0);
-    
-    // Teilt die ID in Symmetrie (3 bis 10 Achsen) und Style (0 bis 7)
-    float d_symmetry = mod(d_shape_id, 8.0) + 3.0; 
-    float d_style    = floor(d_shape_id / 8.0);
-    
-    float d_rotation_speed = (dna(2.0) - 0.5) * 2.0;
-    float d_color_shift    = dna(3.0) * 2.0;
+    // ── 1. GENETIK ─────────────────────────────────────────
+    // Symmetrie glockenverteilt (Summe mehrerer dna-Samples ≈ Normalverteilung)
+    float bell = (dna(1.0) + dna(2.0) + dna(3.0) + dna(4.0)) * 0.25;
+    float d_symmetry = floor(mix(4.0, 18.0, bell) + 0.5);
+    float d_style    = dna(5.0) * 8.0;          // Muster-Charakter
+    float d_rotspd   = (dna(6.0) - 0.5) * 1.4;  // Drehrichtung/-tempo
+    float d_colshift = dna(7.0) * 2.0;
+    float d_nested   = dna(8.0) > 0.45 ? 1.0 : 0.0;  // zweite Faltung
+    float d_beatfx   = floor(dna(9.0) * 3.0);   // 0=Segment 1=Ruck 2=Achse
 
-    // ── 2. AUDIO & BEAT REAKTIVITÄT ────────────────────────
-    // Takt-Erkennung
+    // ── 2. BEAT & AUDIO ────────────────────────────────────
     float beat_phase = fract(u_time * (max(u_bpm, 60.0) / 60.0));
-    // Scharfer Impuls beim Beat-Start, verstärkt durch Bass
-    float beat_pulse = exp(-beat_phase * 6.0) * u_bass;
+    float beat_pulse = exp(-beat_phase * 6.0) * smoothstep(0.1, 0.6, u_bass);
 
-    // Stereo-Paning (verschiebt das Kaleidoskop-Zentrum)
-    float pan = (u_bass_left - u_bass_right) * 0.2;
-    vec2 center = vec2(pan, 0.0);
+    // Stereo verschiebt das Zentrum
+    vec2 center = vec2((u_bass_left - u_bass_right) * 0.18, 0.0);
     uv -= center;
 
-    // Globaler Kaleidoskop-Zoom basierend auf Energie
-    uv *= 1.0 - u_energy * 0.15;
+    // Energie-Atem
+    uv *= 1.0 - u_energy * 0.12 - beat_pulse * 0.08;
 
-    // ── 3. KALEIDOSKOP-FALTUNG (Der Raum wird gespiegelt) ──
+    // ── 3. KALEIDOSKOP-FALTUNG ─────────────────────────────
     float r = length(uv);
     float a = atan(uv.y, uv.x);
 
-    // Basis-Rotation des gesamten Kaleidoskops
-    a += u_time * d_rotation_speed * (0.5 + u_energy * 0.5);
+    // Grund-Rotation
+    a += u_time * d_rotspd * (0.4 + u_energy * 0.6);
 
-    // BEAT BREAK: Auf dem Kickdrum-Schlag "bricht" die Symmetrie auf
-    // Wir verschieben den Winkel ruckartig auf Basis des Beats und der Mitten
-    a += beat_pulse * sin(r * 20.0) * 0.2;
-    
-    // Die eigentliche Spiegelungs-Mathematik (Polar Fold)
-    float segment_angle = TAU / d_symmetry;
-    // Raum in Kuchenstücke teilen
-    a = mod(a, segment_angle); 
-    // In der Mitte jedes Stücks spiegeln (Zick-Zack-Muster)
-    a = abs(a - segment_angle / 2.0); 
+    // Beat-Effekte (Seed wählt einen)
+    float symmetry = d_symmetry;
+    if (d_beatfx < 0.5) {
+        symmetry += floor(beat_pulse * d_symmetry * 0.6);   // Segmentzahl springt
+    } else if (d_beatfx < 1.5) {
+        a += beat_pulse * 1.0;                               // Rotations-Ruck
+    } else {
+        a += beat_pulse * sin(r * 18.0) * 0.25;             // Faltachse bricht auf
+    }
 
-    // Zurück in kartesische Koordinaten für den geknickten Raum
-    vec2 folded_p = r * vec2(cos(a), sin(a));
+    // Polar-Fold
+    float seg = TAU / symmetry;
+    a = mod(a, seg);
+    a = abs(a - seg * 0.5);
 
-    // Mids verzerren den gefalteten Raum (Wobble-Effekt)
-    folded_p.x += sin(r * 15.0 - u_time * 3.0) * u_mid * 0.05;
+    // Verschachtelte zweite Faltung -> dichtere Mandalas
+    if (d_nested > 0.5) {
+        a = abs(a - seg * 0.25);
+    }
+
+    // Mid-Wobble auf dem Radius
+    float rr = r + sin(a * 6.0 + u_time * 1.5) * u_mid * 0.04;
+
+    vec2 folded = rr * vec2(cos(a), sin(a));
 
     // ── 4. MUSTER & FARBE ──────────────────────────────────
-    // Das gewählte Grundmuster berechnen
-    float pattern = get_base_pattern(folded_p, d_style, r, a);
-    
-    // High-Frequenzen lassen die Kanten schärfer aufblitzen
-    float sharp = 0.5 + u_high * 0.5;
-    pattern = smoothstep(0.0 - sharp, 0.0 + sharp, pattern);
+    float field = pattern_field(folded, d_style);
 
-    // Farbauswahl basierend auf Distanz, Muster und Takt
-    float color_t = r * 1.5 - u_time * 0.2 + d_color_shift + pattern * 0.3;
-    
-    // Bass-Flashes auf die Farbpalette anwenden
-    color_t += beat_pulse * 0.4;
-    
+    // High schärft die Kanten
+    float sharp = 0.35 + u_high * 0.6;
+    float m = smoothstep(-sharp, sharp, field);
+
+    // Farbkoordinate: Tiefe + Muster + Takt + Stereo
+    float color_t = r * 1.3 - u_time * 0.15 + d_colshift + m * 0.4
+                  + beat_pulse * 0.4;
     vec3 col = get_palette(color_t);
-    
-    // Kontrast und Helligkeit
-    col *= pattern * (0.6 + u_energy * 0.4 + beat_pulse * 0.8);
 
-    // Zentrum weich ausblenden
-    col *= smoothstep(0.0, 0.1, r);
-    // Vignette
-    col *= smoothstep(1.2, 0.4, r);
+    // Helligkeit: Muster moduliert, Audio hebt an
+    col *= (0.25 + m * 0.9) * (0.6 + u_energy * 0.5 + beat_pulse * 0.9);
 
-    // ── 5. FEEDBACK STATE (Glasige Echos) ──────────────────
+    // Glanzkanten auf den Mustergraten
+    col += u_pal_highlight * pow(m, 8.0) * (0.3 + u_high * 0.7);
+
+    // Zentrum weich, Vignette
+    col *= smoothstep(0.0, 0.08, r);
+    col *= smoothstep(1.25, 0.35, r);
+
+    // ── 5. FEEDBACK STATE ──────────────────────────────────
     vec2 fb_uv = uv_raw;
-    
-    // Kaleidoskop-Feedback-Zoom zum akustischen Zentrum
-    vec2 zoom_center = vec2(0.5) + center * 0.5 * (u_height/u_width);
+    vec2 zoom_center = vec2(0.5) + center * 0.5 * (u_height / u_width);
+
     fb_uv = (fb_uv - zoom_center) * (1.0 / u_fb_zoom) + zoom_center;
-    
     fb_uv -= zoom_center;
     fb_uv = rot2(u_fb_rotation) * fb_uv;
     fb_uv += zoom_center;
-    
-    // Warp, getrieben von Mitten
+
     fb_uv.x += sin(fb_uv.y * 10.0 + u_time) * u_fb_warp_x * (0.5 + u_mid);
     fb_uv.y += cos(fb_uv.x * 10.0 - u_time) * u_fb_warp_y * (0.5 + u_mid);
-    
+
     vec3 prev_col = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb;
     prev_col *= u_fb_decay;
-    
-    // Max-Blend für scharfe, kristalline Spuren (statt weichem Additiv-Nebel)
-    col = max(col, prev_col * (0.8 + u_high * 0.2));
+
+    // Max-Blend für kristalline, scharfe Spuren
+    col = max(col, prev_col * (0.78 + u_high * 0.2));
 
     // Tonemapping
     col = 1.0 - exp(-col);
