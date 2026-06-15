@@ -21,239 +21,205 @@ uniform float u_fb_rotation;
 uniform float u_fb_decay;
 uniform float u_fb_warp_x;
 uniform float u_fb_warp_y;
-
 uniform sampler2D u_prev_frame;
 
 out vec4 fragColor;
 
+const float PI  = 3.14159265;
+const float TAU = 6.28318530;
+
+// Partikel-lokaler Hash (von ID und Salt)
+float ph(float id, float salt) {
+    return fract(sin(id * 127.1 + salt * 311.7) * 43758.5453);
+}
+
+// Globale DNA aus Seed
+float dna(float salt) {
+    float n = fract(u_seed * 5.96046448e-8);
+    return fract(sin(n * 92.7463 + salt * 311.7) * 43758.5453);
+}
+
 vec3 pal(float t) {
-  t = clamp(t, 0.0, 1.0);
-  if (t < 0.333) return mix(u_pal_shadow, u_pal_low,       t * 3.0);
-  if (t < 0.667) return mix(u_pal_low,    u_pal_high,      (t - 0.333) * 3.0);
-                  return mix(u_pal_high,   u_pal_highlight, (t - 0.667) * 3.0);
+    t = clamp(t, 0.0, 1.0);
+    if (t < 0.333) return mix(u_pal_shadow,    u_pal_low,       t * 3.0);
+    if (t < 0.667) return mix(u_pal_low,        u_pal_high,      (t - 0.333) * 3.0);
+    return               mix(u_pal_high,        u_pal_highlight, (t - 0.667) * 3.0);
 }
 
-float hash_seed(float seed, float salt) {
-  return fract(sin(seed * 12.9898 + salt * 78.233) * 43758.5453);
-}
+mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
-float hash11(float p) {
-  p = fract(p * 0.1031); p *= p + 33.33; return fract(p * (p + p));
-}
+// ── 8 Partikel-Typen ──────────────────────────────────────
+// d  = Fragment-Offset vom Partikel-Zentrum (Screen-Space)
+// sz = Screen-Space Radius des Partikels
+// vd = normalisierte Geschwindigkeitsrichtung
+float particle_shape(vec2 d, float type, float sz, vec2 vd) {
+    float r = length(d) / max(sz, 1e-5);
 
-vec2 hash21(vec2 p) {
-  p = fract(p * vec2(0.1031, 0.1030));
-  p += dot(p, p.yx + 33.33);
-  return fract((p.xx + p.yx) * p.xy);
-}
-
-vec3 hash33(vec3 p) {
-  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
-  p += dot(p, p.yxz + 33.33);
-  return fract((p.xxy + p.yxx) * p.zyx);
-}
-
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  float a = hash11(dot(i, vec2(127.1, 311.7)));
-  float b = hash11(dot(i + vec2(1.0, 0.0), vec2(127.1, 311.7)));
-  float c = hash11(dot(i + vec2(0.0, 1.0), vec2(127.1, 311.7)));
-  float d = hash11(dot(i + vec2(1.0, 1.0), vec2(127.1, 311.7)));
-  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-float fbm(vec2 p) {
-  float v = 0.0;
-  float a = 0.5;
-  mat2 rot = mat2(0.8, 0.6, -0.6, 0.8);
-  for (int i = 0; i < 5; i++) {
-    v += a * noise(p);
-    p = rot * p * 2.0;
-    a *= 0.5;
-  }
-  return v;
-}
-
-float particle(vec2 d, float r, float shape) {
-  float l = length(d);
-  float g1 = exp(-l * l / (r * r * 0.18));
-  float g2 = exp(-pow(l - r * 0.7, 2.0) / (r * r * 0.05));
-  float a = atan(d.y, d.x);
-  float g3 = exp(-l / (r * (0.4 + 0.6 * abs(cos(a * shape)))));
-  return max(g1, mix(g2, g3, 0.5));
-}
-
-float line_glow(vec2 a, vec2 b, vec2 p, float w) {
-  vec2 ab = b - a;
-  float len2 = max(dot(ab, ab), 0.0001);
-  float t = clamp(dot(p - a, ab) / len2, 0.0, 1.0);
-  return exp(-dot(p - (a + t * ab), p - (a + t * ab)) / (w * w));
+    if (type < 0.5) {
+        // 0 – Punkt: weicher Gauss-Dot
+        return exp(-r * r * 3.0);
+    }
+    if (type < 1.5) {
+        // 1 – Stern: 4-Punkt-Kreuz mit Zentralkern
+        float cx = exp(-(d.y/sz)*(d.y/sz) * 18.0) * exp(-(d.x/sz)*(d.x/sz) * 0.4);
+        float cy = exp(-(d.x/sz)*(d.x/sz) * 18.0) * exp(-(d.y/sz)*(d.y/sz) * 0.4);
+        return max(cx, cy) + exp(-r * r * 9.0) * 0.5;
+    }
+    if (type < 2.5) {
+        // 2 – Linie: gestreckte Ellipse in Bewegungsrichtung
+        vec2 vp    = vec2(-vd.y, vd.x);
+        float a_v  = dot(d, vd)  / (sz * 2.8);
+        float a_p  = dot(d, vp)  / (sz * 0.32);
+        return exp(-(a_v * a_v + a_p * a_p) * 2.2);
+    }
+    if (type < 3.5) {
+        // 3 – Ring: expandierender hohler Kreis
+        return exp(-pow(r - 0.65, 2.0) * 20.0);
+    }
+    if (type < 4.5) {
+        // 4 – Blob: organisch weich (Metaball-artiger Falloff)
+        float v = max(0.0, 1.0 - r * r);
+        return v * v * v * 1.5;
+    }
+    if (type < 5.5) {
+        // 5 – Pixel: hartes Rechteck (Anti-Alias via smoothstep)
+        float sq = max(abs(d.x), abs(d.y)) / sz;
+        return smoothstep(0.85, 0.65, sq);
+    }
+    if (type < 6.5) {
+        // 6 – Funken: heller Kern + langer Schweif
+        float along_f = max(0.0,  dot(d,  vd)) / sz;   // vor dem Partikel
+        float along_b = max(0.0,  dot(d, -vd)) / sz;   // hinter dem Partikel (Schweif)
+        float perp    = length(d - dot(d, vd) * vd) / sz;
+        float core    = exp(-along_f * 3.5 - perp * perp * 9.0 - along_b * 9.0);
+        float tail    = exp(-along_b * 1.3 - perp * perp * 14.0);
+        return max(core, tail * 0.55);
+    }
+    // 7 – Kristall: 6-fache Symmetrie (Schneeflocke)
+    float ha = mod(atan(d.y, d.x), PI / 3.0);               // Sektor [0, PI/3)
+    float arm = 1.0 - min(ha, PI / 3.0 - ha) / (PI / 6.0); // 1 an Armen, 0 zwischen
+    return exp(-r * r * 1.2) * (0.15 + arm * 2.8 * exp(-r * r * 7.0));
 }
 
 void main() {
-  float d_layer1_count  = floor(2.0 + hash_seed(u_seed,  1.0) * 4.0);
-  float d_layer2_count  = floor(3.0 + hash_seed(u_seed,  2.0) * 7.0);
-  float d_layer3_count  = floor(4.0 + hash_seed(u_seed,  3.0) * 9.0);
-  float d_orbit_style   = hash_seed(u_seed,  4.0);
-  float d_rotation      = (hash_seed(u_seed,  5.0) - 0.5) * 1.2;
-  float d_warp_x        = (hash_seed(u_seed,  6.0) - 0.5) * 2.0;
-  float d_warp_y        = (hash_seed(u_seed,  7.0) - 0.5) * 2.0;
-  float d_color_speed   = 0.1 + hash_seed(u_seed,  8.0) * 1.8;
-  float d_bass_react    = 0.4 + hash_seed(u_seed,  9.0) * 1.0;
-  float d_mid_react     = 0.3 + hash_seed(u_seed, 10.0) * 0.9;
-  float d_high_react    = 0.2 + hash_seed(u_seed, 11.0) * 0.9;
-  float d_pulse_str     = 0.3 + hash_seed(u_seed, 12.0) * 1.2;
-  float d_stereo_str    = 0.04 + hash_seed(u_seed, 13.0) * 0.22;
-  float d_connect       = hash_seed(u_seed, 14.0);
-  float d_glow_exp      = 0.8 + hash_seed(u_seed, 15.0) * 1.6;
-  float d_shape         = floor(2.0 + hash_seed(u_seed, 16.0) * 9.0);
-  float d_trail_str     = hash_seed(u_seed, 17.0) * 0.7;
-  float d_zoom          = 0.7 + hash_seed(u_seed, 18.0) * 0.7;
-  float d_phase         = hash_seed(u_seed, 19.0) * 6.28318;
-  float d_field_drift   = hash_seed(u_seed, 20.0);
+    vec2  fc  = FlutterFragCoord().xy;
+    vec2  res = vec2(u_width, u_height);
+    float asp = u_width / u_height;
 
-  vec2 uv_raw = FlutterFragCoord().xy / vec2(u_width, u_height);
-  vec2 uv = uv_raw * 2.0 - 1.0;
-  uv.x *= u_width / u_height;
+    // ── DNA ────────────────────────────────────────────────
+    float d_type_a   = floor(dna(1.0) * 8.0);         // primärer Typ 0–7
+    float d_type_b   = floor(dna(2.0) * 8.0);         // sekundärer Typ 0–7
+    float d_count    = floor(dna(3.0) * 33.0) + 32.0; // 32–64 aktive Partikel
+    float d_scale    = dna(4.0) * 0.55 + 0.25;        // Orbit-Radius Skala
+    float d_behavior = dna(5.0);                       // 0=eng, 1=ausladend
+    float d_speed    = dna(6.0) * 1.6 + 0.4;          // Basis-Rotationsgeschw.
+    float d_size     = dna(7.0) * 0.038 + 0.018;      // Partikel-Weltgröße
+    float d_clrdrift = dna(8.0) * 0.35 + 0.05;        // Farb-Drift
+    float d_z_range  = dna(9.0) * 1.8 + 0.6;          // Z-Tiefenbereich
+    float d_tilt     = dna(10.0) * 0.55;               // Orbit-Neigung
 
-  vec2 fb = uv_raw - 0.5;
-  fb /= u_fb_zoom;
-  float co = cos(-u_fb_rotation), si = sin(-u_fb_rotation);
-  fb = vec2(fb.x * co - fb.y * si, fb.x * si + fb.y * co);
-  fb.x += sin(fb.y * 8.0 + u_time * 0.7) * u_fb_warp_x;
-  fb.y += cos(fb.x * 8.0 - u_time * 0.5) * u_fb_warp_y;
-  vec2 fb_uv = fb + 0.5;
-  vec2 ef = smoothstep(vec2(0.0), vec2(0.04), fb_uv)
-          * (vec2(1.0) - smoothstep(vec2(0.96), vec2(1.0), fb_uv));
-  vec3 feedback = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb
-                * u_fb_decay * 0.35 * (ef.x * ef.y);
+    // ── Stereo: Partikelfeld-Versatz ──────────────────────
+    float stereo_push = (u_bass_left - u_bass_right) * 0.3;
 
-  float beat_dur = 60.0 / max(u_bpm, 60.0);
-  float beat_phase = fract(u_time / beat_dur);
-  float beat_kick = exp(-beat_phase * 8.0);
+    // ── Beat-Gravitation ───────────────────────────────────
+    float beat_phase = fract(u_time * max(u_bpm, 60.0) / 60.0);
+    // Kurzer scharfer Pull am Beat-Beginn, danach exponentiell abklingend
+    float beat_pull  = exp(-beat_phase * 5.5) * u_bass;
 
-  float lr_diff = u_bass_right - u_bass_left;
-  uv.x -= lr_diff * d_stereo_str * u_stereo;
+    // ── Energy → globale Geschwindigkeit ──────────────────
+    float speed_mod = 1.0 + u_energy * 2.0;
 
-  uv /= d_zoom * (1.0 + beat_kick * d_pulse_str * 0.08 + u_bass * 0.05);
+    // ── Fragment-Position in Weltkoordinaten ───────────────
+    vec2 uv_raw = fc / res;
+    vec2 fp     = (uv_raw - 0.5) * vec2(asp, 1.0) * 2.0;
 
-  float rot = u_time * d_rotation * 0.1 + u_mid * d_mid_react * 0.2;
-  float cr = cos(rot), sr = sin(rot);
-  uv = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);
+    // ── Akkumuliertes Licht ────────────────────────────────
+    vec3 col = u_pal_shadow * 0.025;
 
-  vec2 uv0 = uv;
+    for (int i = 0; i < 64; i++) {
+        if (float(i) >= d_count) break;
+        float id = float(i);
 
-  float wb = 1.0 + u_energy * 2.0;
-  uv.x += sin(uv.y * 3.0 + u_time * 0.6) * d_warp_x * 0.04 * wb;
-  uv.y += cos(uv.x * 3.0 - u_time * 0.5) * d_warp_y * 0.04 * wb;
+        // Orbit-Parameter determinisch aus Partikel-ID
+        float orbit_r   = (ph(id, 1.0) * 0.55 + 0.2) * d_scale;
+        float orbit_spd = (ph(id, 2.0) - 0.5) * 2.0 * d_speed;
+        float orbit_off = ph(id, 3.0) * TAU;
+        float z_base    = ph(id, 5.0) * d_z_range + 0.5;
+        float z_spd     = (ph(id, 6.0) - 0.5) * 0.45;
+        float p_hue     = ph(id, 7.0);
+        float p_sz_mod  = ph(id, 8.0) * 0.55 + 0.7;
+        float p_type    = ph(id, 9.0) > 0.62 ? d_type_b : d_type_a;
 
-  vec3 col = vec3(0.0);
+        // 3D Position (Kreisbahn + Z-Oszillation)
+        float theta  = orbit_off + u_time * orbit_spd * speed_mod;
+        float r_live = orbit_r * (1.0 + u_energy * mix(0.25, 0.75, d_behavior));
+        float px     = cos(theta) * r_live;
+        float py     = sin(theta) * r_live * (0.6 + d_tilt * 0.4);
+        float pz     = z_base + sin(u_time * z_spd + orbit_off) * 0.45;
 
-  // Layer 1: Micro particle field
-  {
-    float dens = (2.0 + d_layer1_count) * 1.4;
-    vec2 guv = (uv + vec2(d_warp_x, d_warp_y) * u_time * 0.03) * dens;
-    vec2 cid = floor(guv);
-    vec2 cuv = fract(guv);
-    float r = 0.35 / dens;
-    for (int dx = -1; dx <= 1; dx++) {
-      for (int dy = -1; dy <= 1; dy++) {
-        vec2 nb = cid + vec2(float(dx), float(dy));
-        vec2 h = hash21(nb + d_phase * 0.0005);
-        vec3 h3 = hash33(vec3(nb, d_phase));
-        float ang = h.x * 6.28318 + u_time * (0.2 + h.y * 0.3) * (d_rotation + 0.01);
-        float rad = 0.08 + h.y * 0.18 + u_bass * d_bass_react * 0.08;
-        vec2 p = vec2(0.5) + rad * vec2(cos(ang), sin(ang));
-        p += (h3.xy - 0.5) * u_high * d_high_react * 0.15;
-        vec2 delta = (cuv - (vec2(float(dx), float(dy)) + p)) / (dens * 0.5);
-        float g = particle(delta, r * d_glow_exp, d_shape);
-        float hue = h3.z + u_time * 0.04 * d_color_speed + d_phase / 6.28318;
-        col += pal(fract(hue)) * g * (0.6 + u_energy * 0.5 + beat_kick * 0.4) * 0.5;
-      }
+        // Beat-Gravitation: Partikel werden zum Zentrum gesaugt
+        float pull   = beat_pull * 0.85;
+        px = mix(px, px * 0.04, pull);
+        py = mix(py, py * 0.04, pull);
+
+        // Stereo-Feld: L-dominante Sounds → Partikel nach links
+        px += stereo_push;
+
+        // Mid: sanfte seitliche Wellenbewegung
+        px += sin(u_time * 0.75 + orbit_off) * u_mid * 0.12;
+        py += cos(u_time * 0.63 + orbit_off * 1.3) * u_mid * 0.08;
+
+        // Perspektiv-Projektion
+        float pz_s   = max(pz, 0.12);
+        vec2  screen = vec2(px, py) / pz_s;
+        float p_sz   = d_size * p_sz_mod / pz_s;
+
+        // Frühes Abbruch-Kriterium (kein Fragment-Beitrag → überspringen)
+        vec2  dvec = fp - screen;
+        if (length(dvec) > p_sz * 4.5) continue;
+
+        // Geschwindigkeitsrichtung (Tangente der Kreisbahn)
+        vec2 vd = normalize(vec2(-sin(theta), cos(theta)) * sign(orbit_spd)
+                          + vec2(0.0001, 0.0));
+
+        float contrib = particle_shape(dvec, p_type, p_sz, vd);
+        if (contrib < 0.002) continue;
+
+        // Farbe: Palette + Tiefen-Versatz + Zeitdrift
+        float depth_t = 1.0 - clamp(pz / (d_z_range + 0.5), 0.0, 1.0);
+        float ct      = fract(p_hue + depth_t * 0.35 + u_time * d_clrdrift * 0.04);
+        vec3  pcol    = pal(ct);
+
+        // Helligkeit: näher = heller; Bass-Kick verstärkt kurz
+        float bright  = (1.4 / pz_s) * (0.8 + u_energy * 0.5 + beat_pull * 0.6);
+        col += pcol * contrib * bright;
     }
-  }
 
-  // Layer 2: Hero orbit particles
-  vec2 hero_pos[12];
-  vec3 hero_col[12];
-  float hero_alive[12];
-  int hero_n = int(min(d_layer2_count, 12.0));
-  for (int i = 0; i < 12; i++) {
-    hero_alive[i] = float(i) < d_layer2_count ? 1.0 : 0.0;
-    if (hero_alive[i] < 0.5) continue;
-    float fi = float(i);
-    vec2 h = hash21(vec2(fi * 17.3, fi * 9.71) + d_phase * 0.003);
-    float theta = fi / d_layer2_count * 6.28318 + h.x * 6.28318
-                + u_time * (0.2 + h.y * 0.4) * d_rotation;
-    theta += fi * d_phase * 0.1;
-    float r = 0.25 + (fi / d_layer2_count) * 0.55 + u_bass * d_bass_react * 0.2;
-    r *= 1.0 + beat_kick * d_pulse_str * 0.15;
-    vec2 pos;
-    if (d_orbit_style < 0.33) {
-      pos = r * vec2(cos(theta), sin(theta));
-    } else if (d_orbit_style < 0.66) {
-      float k = 2.0 + floor(hash_seed(u_seed, 21.0) * 4.0);
-      pos = r * abs(sin(k * theta)) * vec2(cos(theta), sin(theta));
-    } else {
-      pos = r * vec2(sin(2.0 * theta + d_phase), cos(3.0 * theta));
-    }
-    pos.x += (i % 2 == 0 ? u_bass_left : -u_bass_right) * u_stereo * d_stereo_str * 0.5;
-    pos += (h - 0.5) * u_mid * d_mid_react * 0.15;
-    hero_pos[i] = pos;
-    float hue = fi / d_layer2_count + u_time * 0.05 * d_color_speed + d_phase / 6.28318;
-    hero_col[i] = pal(fract(hue));
-    float g = particle(uv - pos, 0.08 * d_glow_exp, d_shape) * 5.0 * hero_alive[i];
-    float bri = 0.8 + u_energy * 0.5 + beat_kick * 0.5;
-    col += hero_col[i] * g * bri;
-  }
+    // ── High-Band: Fein-Glimmer im Hintergrund ────────────
+    float gx = sin(fp.x * 85.0 + u_time * 3.1);
+    float gy = sin(fp.y * 85.0 - u_time * 2.4);
+    col += u_pal_highlight * max(0.0, gx * gy) * u_high * 0.055;
 
-  // Connection lines
-  if (d_connect > 0.4) {
-    for (int i = 0; i < 12; i++) {
-      if (hero_alive[i] < 0.5 || hero_alive[(i + 1) % 12] < 0.5) continue;
-      int j = (i + 1) % 12;
-      int k = (i + 3) % 12;
-      if (hero_alive[k] > 0.5) {
-        float ln = line_glow(hero_pos[i], hero_pos[k], uv, 0.015 * (1.0 + u_high * 0.5));
-        col += mix(hero_col[i], hero_col[k], 0.5) * ln * 0.35 * d_connect;
-      }
-      float ln = line_glow(hero_pos[i], hero_pos[j], uv, 0.02 * (1.0 + u_mid * 0.3));
-      col += mix(hero_col[i], hero_col[j], 0.5) * ln * 0.5 * d_connect;
-    }
-  }
+    // ── Vignette ──────────────────────────────────────────
+    float vig = 1.0 - smoothstep(0.38, 1.0, length(uv_raw - 0.5) * 2.0);
+    col *= vig;
 
-  // Layer 3: Stereo field particles
-  {
-    float n = d_layer3_count;
-    for (int i = 0; i < 16; i++) {
-      if (float(i) >= n) break;
-      float fi = float(i);
-      vec2 h = hash21(vec2(fi * 11.7, fi * 5.43) + d_phase * 0.005);
-      float side = fi < n * 0.5 ? -1.0 : 1.0;
-      float y = (fract(fi / n + u_time * 0.08 + h.y * 0.2) * 2.0 - 1.0) * 0.85;
-      float x = side * (0.35 + h.x * 0.45 + u_bass * d_bass_react * 0.2);
-      x += (side > 0.0 ? u_bass_right : u_bass_left) * u_stereo * d_stereo_str * 0.8;
-      float g = particle(uv - vec2(x, y), 0.06 * d_glow_exp, d_shape) * 3.0;
-      float hue = fi / n + u_time * 0.06 * d_color_speed + (side > 0.0 ? 0.15 : 0.0);
-      col += pal(fract(hue)) * g * (0.5 + u_energy * 0.5);
-    }
-  }
+    // ── Feedback / Trails ─────────────────────────────────
+    vec2 fb  = uv_raw - 0.5;
+    fb      /= u_fb_zoom;
+    fb       = rot2(-u_fb_rotation) * fb;
+    fb.x    += sin(fb.y * 8.0 + u_time) * u_fb_warp_x;
+    fb.y    += cos(fb.x * 8.0 - u_time) * u_fb_warp_y;
+    fb      += 0.5;
 
-  // High frequency sparkle dust
-  float dust = fbm(uv * 6.0 + u_time * 0.4) * fbm(uv * 9.0 - u_time * 0.3);
-  col += u_pal_highlight * smoothstep(0.6, 0.9, dust) * u_high * d_high_react * 0.25;
+    vec2  ef    = smoothstep(0.0, 0.04, fb) * (1.0 - smoothstep(0.96, 1.0, fb));
+    float efade = ef.x * ef.y;
+    vec3  prev  = texture(u_prev_frame, clamp(fb, 0.001, 0.999)).rgb;
+    vec3  trail = prev * u_fb_decay * efade;
 
-  // Beat flash + stereo core glow
-  col += beat_kick * 0.06 * u_pal_highlight;
-  col += u_pal_low * exp(-length(uv0) * (2.5 - u_energy)) * 0.15;
-  col *= 1.0 + u_energy * 0.25;
+    // Additiv überlagern → helle Schweife ohne Überbelichtung
+    col = max(col, trail * 0.88);
+    col = clamp(col, 0.0, 1.0);
 
-  vec2 vig_uv = uv_raw * 2.0 - 1.0;
-  float vig = 1.0 - smoothstep(0.5, 1.5, dot(vig_uv, vig_uv));
-  col *= vig;
-
-  col = feedback + col;
-  fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    fragColor = vec4(col, 1.0);
 }
