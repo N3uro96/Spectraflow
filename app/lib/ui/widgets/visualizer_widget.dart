@@ -136,8 +136,10 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     s.setFloat(i++, a.bassLeft.clamp(0.0, 1.0));
     s.setFloat(i++, a.bassRight.clamp(0.0, 1.0));
 
-    // Seed (1) – raw; shaders normalize internally
-    s.setFloat(i++, (widget.seed % (1 << 24)).toDouble());
+    // Seed (1) – normalized to [0,1). Passing the raw int (up to 2^24) breaks
+    // sin()-based hashes on the GPU: large floats lose precision so many
+    // different seeds collapse to the same DNA (tunnel looked identical).
+    s.setFloat(i++, ((widget.seed % (1 << 24)) / (1 << 24)).toDouble());
 
     // Palette (4 × vec3 = 12)
     final (sr, sg, sb) = _toVec3(p.shadow);

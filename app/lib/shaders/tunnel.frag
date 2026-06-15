@@ -30,8 +30,9 @@ const float TAU = 6.28318530718;
 
 // ── GENETISCHER CODE (Aus Seed) ──────────────────────────
 // Erzeugt Pseudo-Zufallszahlen basierend auf dem Seed und einem "Salt"
+// u_seed liegt in [0,1) (in Dart normalisiert) -> GPU-sichere sin()-Argumente.
 float dna(float salt) {
-    return fract(sin(u_seed * 12.9898 + salt * 78.233) * 43758.5453);
+    return fract(sin(salt * 78.233 + u_seed * 113.5) * 43758.5453);
 }
 
 // ── FARBPALETTE (Weicher Übergang) ────────────────────────

@@ -29,8 +29,9 @@ const float PI  = 3.14159265359;
 const float TAU = 6.28318530718;
 
 // ── DETERMINISTISCHE HASH-FUNKTIONEN ────────────────────
+// u_seed liegt in [0,1) (in Dart normalisiert) -> GPU-sichere sin()-Argumente.
 float dna(float salt) {
-    return fract(sin(salt * 92.7463 + u_seed * 13.37) * 43758.5453);
+    return fract(sin(salt * 78.233 + u_seed * 113.5) * 43758.5453);
 }
 
 // 2D -> 1D Hash für Kacheln

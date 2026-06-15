@@ -28,12 +28,13 @@ out vec4 fragColor;
 const float PI  = 3.14159265359;
 const float TAU = 6.28318530718;
 
+// u_seed liegt in [0,1) (in Dart normalisiert) -> GPU-sichere sin()-Argumente.
 float ph(float id, float salt) {
-    return fract(sin(id * 127.1 + salt * 311.7 + u_seed * 0.123) * 43758.5453);
+    return fract(sin(id * 127.1 + salt * 311.7 + u_seed * 113.5) * 43758.5453);
 }
 
 float dna(float salt) {
-    return fract(sin(salt * 92.7463 + u_seed * 0.005) * 43758.5453);
+    return fract(sin(salt * 78.233 + u_seed * 113.5) * 43758.5453);
 }
 
 vec3 pal(float t) {
