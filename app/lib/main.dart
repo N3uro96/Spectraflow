@@ -6,6 +6,7 @@ import 'core/audio_manager.dart';
 import 'core/fps_counter.dart';
 import 'core/palette_manager.dart';
 import 'core/seed_manager.dart';
+import 'core/shader_manager.dart';
 import 'ui/screens/visualizer_screen.dart';
 import 'ui/theme/sf_theme.dart';
 
@@ -34,6 +35,7 @@ class SpectraflowApp extends StatelessWidget {
           return p;
         }),
         ChangeNotifierProvider(create: (_) => SeedManager()),
+        ChangeNotifierProvider(create: (_) => ShaderManager()),
         ChangeNotifierProvider(create: (_) => PaletteManager()),
         ChangeNotifierProvider(create: (_) => FpsCounter()),
       ],

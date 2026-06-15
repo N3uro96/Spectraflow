@@ -5,20 +5,7 @@ import '../../core/audio_data_provider.dart';
 import '../../core/feedback_state.dart';
 import '../../core/fps_counter.dart';
 import '../../core/palette_data.dart';
-
-const List<String> kShaderPaths = [
-  'lib/shaders/tunnel.frag',
-  'lib/shaders/particles.frag',
-  'lib/shaders/kaleidoscope.frag',
-  'lib/shaders/chessboard.frag',
-];
-
-const List<String> kShaderNames = [
-  'Tunnel',
-  'Particles',
-  'Kaleidoscope',
-  'Chessboard',
-];
+import '../../core/shader_manager.dart';
 
 class VisualizerWidget extends StatefulWidget {
   final AudioDataProvider audioData;

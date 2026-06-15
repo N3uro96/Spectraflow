@@ -6,6 +6,7 @@ import '../../core/audio_data_provider.dart';
 import '../../core/fps_counter.dart';
 import '../../core/seed_manager.dart';
 import '../../core/palette_manager.dart';
+import '../../core/shader_manager.dart';
 import '../theme/sf_theme.dart';
 import '../widgets/glass_container.dart';
 import '../widgets/visualizer_widget.dart';
@@ -19,6 +20,7 @@ class VisualizerScreen extends StatelessWidget {
     final audioData = context.read<AudioDataProvider>();
     final seeds = context.watch<SeedManager>();
     final palettes = context.watch<PaletteManager>();
+    final shaders = context.watch<ShaderManager>();
     final fps = context.read<FpsCounter>();
 
     return Scaffold(
@@ -31,6 +33,7 @@ class VisualizerScreen extends StatelessWidget {
               seed: seeds.currentSeed,
               palette: palettes.current,
               fps: fps,
+              shaderIndex: shaders.index,
               onTap: palettes.next,
               onDoubleTap: palettes.randomize,
             ),
@@ -60,13 +63,30 @@ class _TopBar extends StatelessWidget {
     final accent = context.watch<PaletteManager>().accent;
     final fps = context.watch<FpsCounter>().fps;
 
+    final shaders = context.watch<ShaderManager>();
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
         children: [
-          Text('SPECTRAFLOW',
-              style: SFTheme.labelSmall.copyWith(
-                  letterSpacing: 3.0, color: SFTheme.textPrimary)),
+          GestureDetector(
+            onTap: shaders.next,
+            child: GlassContainer(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              borderRadius: SFTheme.radiusSm,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.auto_awesome_rounded, color: accent, size: 16),
+                const SizedBox(width: 8),
+                Text(shaders.name.toUpperCase(),
+                    style: SFTheme.titleMedium.copyWith(
+                        letterSpacing: 1.5, color: SFTheme.textPrimary)),
+                const SizedBox(width: 8),
+                Text('${shaders.index + 1}/${shaders.count}',
+                    style: SFTheme.labelSmall),
+              ]),
+            ),
+          ),
           const Spacer(),
           ListenableBuilder(
             listenable: audioData,
