@@ -28,14 +28,27 @@ out vec4 fragColor;
 const float PI  = 3.14159265359;
 const float TAU = 6.28318530718;
 
-// ── GENETISCHER CODE (Aus Seed) ──────────────────────────
-// Erzeugt Pseudo-Zufallszahlen basierend auf dem Seed und einem "Salt"
-// u_seed liegt in [0,1) (in Dart normalisiert) -> GPU-sichere sin()-Argumente.
+// u_seed in [0,1) -> GPU-sichere sin()-Argumente.
 float dna(float salt) {
     return fract(sin(salt * 78.233 + u_seed * 113.5) * 43758.5453);
 }
 
-// ── FARBPALETTE (Weicher Übergang) ────────────────────────
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+}
+
+float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = hash21(i);
+    float b = hash21(i + vec2(1.0, 0.0));
+    float c = hash21(i + vec2(0.0, 1.0));
+    float d = hash21(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 vec3 get_palette(float t) {
     t = clamp(t, 0.0, 1.0);
     vec3 col = mix(u_pal_shadow, u_pal_low, smoothstep(0.0, 0.33, t));
@@ -44,167 +57,132 @@ vec3 get_palette(float t) {
     return col;
 }
 
-// ── HILFSFUNKTIONEN ────────────────────────────────────────
 mat2 rot2(float a) {
     float c = cos(a), s = sin(a);
     return mat2(c, -s, s, c);
 }
 
 void main() {
-    // ── Setup ───────────────────────────────────────────────
-    vec2 fc = FlutterFragCoord().xy;
+    vec2 fc  = FlutterFragCoord().xy;
     vec2 res = vec2(u_width, u_height);
-    
-    // Normalisierte UVs (0 bis 1)
-    vec2 uv_raw = fc / res; 
-    
-    // Zentrierte UVs (-1 bis 1, Aspekt-korrigiert)
+    vec2 uv_raw = fc / res;
     vec2 p = (fc - res * 0.5) / min(u_width, u_height);
 
-    // ── 1. DNA: Generative Parameter festlegen ────────────
-    // Richtung: Rein (1.0) oder Raus (-1.0)
-    float d_direction = dna(1.0) > 0.5 ? 1.0 : -1.0;
-    
-    // Grundform: 0=Kreis, 1=Quadrat, 2=Polygon
-    float d_shape = floor(dna(2.0) * 3.0);
-    float d_poly_sides = floor(dna(3.0) * 5.0) + 3.0; // 3 bis 8 Seiten
-    
-    // Muster-Typ: 0=Ringe, 1=Spiralen, 2=Punkte/Grid
-    float d_pattern = floor(dna(4.0) * 3.0);
-    
-    // Tunnel-Ende Typ: 0=Dunkel, 1=Licht, 2=Neutral (Paletten-Rotation)
-    float d_end_type = floor(dna(5.0) * 3.0);
+    // ── 1. DNA ──────────────────────────────────────────────
+    float d_dir      = dna(1.0) > 0.5 ? 1.0 : -1.0;      // rein / raus
+    float d_shapeamp = dna(2.0) * 0.28;                  // Querschnitt-Verformung
+    float d_sides    = floor(dna(3.0) * 5.0) + 3.0;      // 3–7 Ecken
+    float d_sharp    = dna(4.0);                         // rund -> sternig
+    float d_segments = floor(dna(5.0) * 6.0) + 2.0;      // Winkel-Spiegelsegmente
+    float d_panels   = floor(dna(6.0) * 4.0) + 3.0;      // Panels pro Segment
+    float d_ringfreq = floor(dna(7.0) * 4.0) + 2.0;      // Dichte entlang der Tiefe
+    float d_twist    = (dna(8.0) - 0.5) * 3.0;           // Spiral-Verdrehung
+    float d_end      = floor(dna(9.0) * 3.0);            // Ende: dunkel/hell/neutral
+    float d_palspd   = dna(10.0) * 0.15 + 0.03;
+    float d_brick    = dna(11.0) > 0.5 ? 1.0 : 0.0;      // versetzte Reihen
 
-    // ── 2. AUDIO & PERSPEKTIVE ─────────────────────────────
-    
-    // Stereo-Fluchtpunkt-Verschiebung
-    // u_stereo ist 0..1, daher die Richtung aus der L/R-Bass-Balance ableiten.
-    // Bewusst sanft gehalten, damit der Fluchtpunkt nur leicht wandert.
-    float perspective_shift = (u_bass_left - u_bass_right) * 0.12;
-    p.x -= perspective_shift;
+    // ── 2. PERSPEKTIVE & STEREO ────────────────────────────
+    float pshift = (u_bass_left - u_bass_right) * 0.12;  // sanfte Fluchtpunkt-Wanderung
+    p.x -= pshift;
 
-    // Polarkoordinaten berechnen
     float r = length(p);
-    float angle = atan(p.y, p.x);
+    float a = atan(p.y, p.x);
 
-    // Form-Deformation (aus DNA)
-    if (d_shape > 0.5) {
-        // Erzeugt Ecken (Quadrat oder Polygon)
-        float num_sides = (d_shape < 1.5) ? 4.0 : d_poly_sides;
-        float a_segment = angle * num_sides;
-        float poly_distortion = cos(a_segment) * 0.1;
-        // Mitten-Frequenzen lassen die Ecken vibrieren
-        r += poly_distortion * (0.5 + u_mid * 0.5);
-    }
+    // Querschnittsform deformieren (Polygon/Stern, von Mitten vibriert)
+    float shapeMod = cos(a * d_sides);
+    shapeMod = mix(shapeMod, abs(shapeMod) * 2.0 - 1.0, d_sharp);
+    r *= 1.0 + d_shapeamp * shapeMod * (0.6 + u_mid * 0.8);
 
-    // Tiefe (Perspektive): r=0 ist unendlich weit weg
-    // Wir addieren u_high, damit Höhen den Tunnel leicht "zittern" lassen
-    float depth = 1.0 / (r + 0.001 + u_high * 0.1);
+    // ── 3. TIEFE & FLUSS (gleichmäßiger Sog) ───────────────
+    float depth = 1.0 / (r + 0.05);
+    float speed = 0.5 + (u_bpm / 60.0) * 0.35 + u_energy * 1.6;
+    float beat  = exp(-fract(u_time * (max(u_bpm, 60.0) / 60.0)) * 5.0)
+                * smoothstep(0.2, 0.7, u_bass);
 
-    // ── 3. BEWEGUNG & MUSTER ───────────────────────────────
-    
-    // Geschwindigkeit basierend auf BPM und Energy
-    // Wir nutzen u_bpm, um eine takt-synchrone Basisgeschwindigkeit zu haben
-    float bpm_speed = (u_bpm / 60.0) * u_time;
-    float move_speed = (bpm_speed + u_energy * 2.0) * d_direction;
-    
-    // Animierte Z-Koordinate (Tiefe + Zeit)
-    float z_anim = depth + move_speed;
+    // Tiefen-Koordinate; Bass-Punch lässt den Tunnel kurz nach vorn springen
+    float v = depth * d_ringfreq + u_time * speed * d_dir + beat * 0.4 * d_dir;
 
-    // Muster-Generierung
-    float pattern_raw = 0.0;
-    
-    // Wir nutzen Mid-Frequenzen, um die Musterdicke zu steuern
-    float wave_width = 0.5 + u_mid * 0.5;
+    // ── 4. WAND-GEOMETRIE (gefaltete Panels + Twist) ───────
+    float seg = TAU / d_segments;
+    float aa  = mod(a, seg);
+    aa = abs(aa - seg * 0.5);          // Spiegelung -> Kaleidoskop-Wände
+    aa += depth * d_twist * 0.15;       // mit der Tiefe verdrehen -> Spirale
 
-    if (d_pattern < 0.5) {
-        // Retaillierte Ringe
-        pattern_raw = sin(z_anim * 10.0);
-    } else if (d_pattern < 1.5) {
-        // Spirale
-        pattern_raw = sin(z_anim * 10.0 + angle);
-    } else {
-        // Grid/Punkte (z-Wellen * Winkel-Wellen)
-        pattern_raw = sin(z_anim * 10.0) * cos(angle * 6.0);
-    }
-    
-    // Muster schärfen (Licht-Streifen)
-    float pattern_sharp = smoothstep(1.0 - wave_width, 1.0, pattern_raw);
+    float u = aa / seg * d_panels;      // Panels rund um das Segment
+    float w = v;
 
-    // ── 4. FARBGEBUNG ───────────────────────────────────────
-    
-    // Basis-Farbkoordinate basierend auf Tiefe und Takt
-    float color_t = fract(depth * 0.1 + bpm_speed * 0.05);
-    
-    // Bassdrum-Akzent: Erzeugt einen Flash-Effekt
-    // smoothstep macht den Kick knackiger
-    float bass_kick = smoothstep(0.4, 0.9, u_bass);
-    
-    // Muster-Farbe
-    vec3 ring_col = get_palette(color_t + pattern_sharp * 0.2);
-    
-    // Hintergrund-Farbe (Nebelfarbe in der Ferne)
-    vec3 bg_col = u_pal_shadow * 0.5;
-    
-    // Mix aus Hintergrund und Ringen, intensiviert durch Energie
-    vec3 col = mix(bg_col, ring_col, pattern_sharp * (0.8 + u_energy * 0.4));
-    
-    // Bass drum Akzent auf die gesamte Farbe anwenden
-    col += u_pal_highlight * bass_kick * 0.5;
+    // versetzte Reihen (Ziegelmuster)
+    u += (d_brick > 0.5) ? mod(floor(w), 2.0) * 0.5 : 0.0;
 
-    // ── 5. TUNNEL-ENDE (ZENTRUM) ───────────────────────────
-    
-    // Maske für das Zentrum (r nahe 0 -> depth sehr hoch)
-    float core_mask = smoothstep(20.0, 5.0, depth);
-    
+    vec2 cell = vec2(u, w);
+    vec2 cid  = floor(cell);
+    vec2 cf   = fract(cell);
+
+    // Pro Panel ein Hash -> Frequenzband zuordnen
+    float h = hash21(cid + vec2(d_segments, d_panels));
+    float band = (h < 0.34) ? u_bass : (h < 0.7) ? u_mid : u_high;
+
+    // Leuchtende Fugen (Grid-Linien) + Panel-Füllung
+    vec2 edge = min(cf, 1.0 - cf);
+    float grout = 1.0 - smoothstep(0.0, 0.06, min(edge.x, edge.y));
+    float panel = smoothstep(0.5, 0.42, max(abs(cf.x - 0.5), abs(cf.y - 0.5)));
+
+    // Feine Wand-Textur
+    float det = vnoise(vec2(u * 2.0, w * 3.0) + u_time * 0.2);
+
+    // ── 5. FARBE ───────────────────────────────────────────
+    float ct = fract(w * 0.12 + u_time * d_palspd + h * 0.15);
+    vec3 wall = get_palette(ct);
+
+    vec3 col = wall * (0.12 + det * 0.15);                       // dunkle Basis + Textur
+    col += wall * panel * (0.25 + band * 1.2 + beat * 0.5);      // beleuchtete Panels (Audio)
+    col += u_pal_highlight * grout * (0.5 + u_high * 1.5 + beat * 0.8); // glühende Fugen
+    col += u_pal_highlight * beat * 0.4;                         // Bass-Farbblitz
+
+    // ── 6. TUNNEL-ENDE + NEBEL ─────────────────────────────
+    float fog = smoothstep(6.0, 26.0, depth);  // Richtung Fluchtpunkt
     vec3 end_col;
-    if (d_end_type < 0.5) {
-        // Dunkelheit
-        end_col = vec3(0.0);
-    } else if (d_end_type < 1.5) {
-        // Licht (Gleißend)
-        end_col = u_pal_highlight * (1.0 + u_energy * 3.0);
+    if (d_end < 0.5) {
+        end_col = u_pal_shadow * 0.05;                 // Dunkelheit
+    } else if (d_end < 1.5) {
+        end_col = u_pal_highlight * (1.2 + u_energy * 2.5); // gleißendes Licht
     } else {
-        // Neutral (rotiert durch Palette)
-        end_col = get_palette(fract(u_time * 0.1));
+        end_col = get_palette(fract(u_time * 0.08));   // neutral, rotierend
     }
-    
-    // Tunnel-Farbe mit Ende-Farbe mischen
-    col = mix(end_col, col, core_mask);
+    col = mix(col, end_col, fog);
 
-    // Vignette (Ränder abdunkeln)
-    float vignette = smoothstep(1.2, 0.3, length(uv_raw - 0.5) * 2.0);
-    col *= vignette;
+    // Kern-Glühen
+    float core = smoothstep(0.35, 0.0, r);
+    col += end_col * core * (0.3 + u_energy * 0.5);
 
-    // ── 6. FEEDBACK LOOP (TRAILS) ─────────────────────────
-    
-    // UVs für den Rückblick leicht transformieren
-    vec2 fb_uv = uv_raw;
-    
-    // 1. Zoom (um das Zentrum des Tunnels, nicht der Screen-Mitte)
-    vec2 zoom_center = vec2(0.5 + perspective_shift * 0.5 * (u_height/u_width), 0.5);
-    fb_uv = (fb_uv - zoom_center) * (1.0 / u_fb_zoom) + zoom_center;
-    
-    // 2. Rotation
-    fb_uv -= zoom_center;
-    fb_uv = rot2(u_fb_rotation) * fb_uv;
-    fb_uv += zoom_center;
-    
-    // 3. Warp (Flüssigkeits-Effekt, gesteuert durch Mids/Highs)
-    fb_uv.x += sin(fb_uv.y * 10.0 + u_time) * u_fb_warp_x * (0.2 + u_high);
-    fb_uv.y += cos(fb_uv.x * 10.0 - u_time) * u_fb_warp_y * (0.2 + u_mid);
-    
-    // Sample das vorherige Frame
-    vec3 prev_col = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb;
-    
-    // Decay anwenden (Rückkopplung abschwächen)
-    prev_col *= u_fb_decay;
-    
-    // Blend-Modus: Additiv für leuchtende Trails
-    // Gesteuert durch u_energy, damit Trails bei leiser Musik verschwinden
+    // Stereo L/R Helligkeits-Akzente
+    float lr = (uv_raw.x < 0.5) ? u_bass_left : u_bass_right;
+    col *= 0.85 + lr * 0.4;
+
+    // Vignette
+    col *= smoothstep(1.25, 0.25, length(uv_raw - 0.5) * 2.0);
+
+    // ── 7. FEEDBACK + CHROMATISCHE ABERRATION ──────────────
+    vec2 zc = vec2(0.5 + pshift * 0.5 * (u_height / u_width), 0.5);
+    vec2 fb = (uv_raw - zc) * (1.0 / u_fb_zoom) + zc;
+    fb -= zc;
+    fb = rot2(u_fb_rotation) * fb;
+    fb += zc;
+    fb.x += sin(fb.y * 10.0 + u_time) * u_fb_warp_x * (0.2 + u_high);
+    fb.y += cos(fb.x * 10.0 - u_time) * u_fb_warp_y * (0.2 + u_mid);
+
+    vec2 caDir = uv_raw - 0.5;
+    float ca = 0.002 + u_energy * 0.004;
+    vec3 prev;
+    prev.r = texture(u_prev_frame, clamp(fb + caDir * ca, 0.001, 0.999)).r;
+    prev.g = texture(u_prev_frame, clamp(fb,               0.001, 0.999)).g;
+    prev.b = texture(u_prev_frame, clamp(fb - caDir * ca, 0.001, 0.999)).b;
+    prev *= u_fb_decay;
+
     float trail_strength = 0.5 + u_energy * 0.5;
-    col = col + prev_col * trail_strength;
+    col = col + prev * trail_strength;
 
-    // Finale Ausgabe
+    // Tonemapping gegen Clipping
+    col = 1.0 - exp(-col);
     fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
