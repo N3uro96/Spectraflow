@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -36,20 +37,25 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   late Ticker _ticker;
   double _time = 0.0;
   Duration _lastTick = Duration.zero;
+  double _dpr = 1.0;
 
   ui.FragmentShader? _shader;
   int _loadedShaderIndex = -1;
   bool _shaderLoading = false;
 
-  // Previous-frame double buffer
-  ui.Image? _prevFrame;
-  bool _renderingFrame = false;
+  // 1×1 transparent fallback so the sampler is always bound.
+  ui.Image? _dummy;
+
+  // Last rendered frame – shown on screen AND fed back into the shader.
+  ui.Image? _front;
+  bool _rendering = false;
 
   final FeedbackState _feedback = FeedbackState();
 
   @override
   void initState() {
     super.initState();
+    _initDummy();
     _ticker = createTicker(_onTick)..start();
     _loadShader(widget.shaderIndex);
   }
@@ -62,16 +68,31 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     }
   }
 
+  Future<void> _initDummy() async {
+    final data = Uint8List(4); // (0,0,0,0) – fully transparent
+    final buf = await ui.ImmutableBuffer.fromUint8List(data);
+    final desc = ui.ImageDescriptor.raw(buf,
+        width: 1, height: 1, pixelFormat: ui.PixelFormat.rgba8888);
+    final codec = await desc.instantiateCodec();
+    final frame = await codec.getNextFrame();
+    if (!mounted) {
+      frame.image.dispose();
+      return;
+    }
+    _dummy = frame.image;
+  }
+
   Future<void> _loadShader(int index) async {
     if (_shaderLoading || index == _loadedShaderIndex) return;
     _shaderLoading = true;
     try {
       final program = await ui.FragmentProgram.fromAsset(kShaderPaths[index]);
       if (!mounted) return;
-      setState(() {
-        _shader = program.fragmentShader();
-        _loadedShaderIndex = index;
-      });
+      _shader = program.fragmentShader();
+      _loadedShaderIndex = index;
+      // drop the old feedback buffer so trails don't bleed across shaders
+      _front?.dispose();
+      _front = null;
     } catch (e) {
       debugPrint('Shader load error (${kShaderPaths[index]}): $e');
     } finally {
@@ -92,14 +113,11 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     if (mounted) setState(() {});
   }
 
-  // Converts a Flutter Color to three floats [r, g, b] in linear-ish space.
-  static (double, double, double) _toVec3(Color c) => (
-        c.red / 255.0,
-        c.green / 255.0,
-        c.blue / 255.0,
-      );
+  static (double, double, double) _toVec3(Color c) =>
+      (c.red / 255.0, c.green / 255.0, c.blue / 255.0);
 
-  void _bindUniforms(Size size) {
+  // Binds every uniform. `pixelSize` is the physical render resolution.
+  void _bindUniforms(Size pixelSize) {
     final s = _shader!;
     final a = widget.audioData;
     final p = widget.palette;
@@ -107,8 +125,8 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
 
     // Audio (11)
     s.setFloat(i++, _time);
-    s.setFloat(i++, size.width);
-    s.setFloat(i++, size.height);
+    s.setFloat(i++, pixelSize.width);
+    s.setFloat(i++, pixelSize.height);
     s.setFloat(i++, ((a.bassLeft + a.bassRight) * 0.5).clamp(0.0, 1.0));
     s.setFloat(i++, a.midLeft.clamp(0.0, 1.0));
     s.setFloat(i++, a.highLeft.clamp(0.0, 1.0));
@@ -118,7 +136,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     s.setFloat(i++, a.bassLeft.clamp(0.0, 1.0));
     s.setFloat(i++, a.bassRight.clamp(0.0, 1.0));
 
-    // Seed (1)
+    // Seed (1) – raw; shaders normalize internally
     s.setFloat(i++, (widget.seed % (1 << 24)).toDouble());
 
     // Palette (4 × vec3 = 12)
@@ -138,49 +156,57 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     s.setFloat(i++, _feedback.warpX);
     s.setFloat(i++, _feedback.warpY);
 
-    // Previous frame sampler (index 0)
-    if (_prevFrame != null) {
-      s.setImageSampler(0, _prevFrame!);
+    // Previous frame sampler (index 0) – ALWAYS bound (dummy if no frame yet)
+    final sampler = _front ?? _dummy;
+    if (sampler != null) {
+      s.setImageSampler(0, sampler);
     }
   }
 
-  // Renders the current shader to an offscreen image and stores it as _prevFrame.
-  Future<void> _capturePrevFrame(Size size) async {
-    if (_renderingFrame || _shader == null) return;
-    _renderingFrame = true;
+  // Renders the shader offscreen → becomes the new _front (and feedback source).
+  Future<void> _render(Size logical) async {
+    if (_rendering || _shader == null || _dummy == null) return;
+    final w = (logical.width * _dpr).round();
+    final h = (logical.height * _dpr).round();
+    if (w <= 0 || h <= 0) return;
 
-    final recorder = ui.PictureRecorder();
-    final canvas = Canvas(recorder);
-    _bindUniforms(size);
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..shader = _shader,
-    );
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(size.width.toInt(), size.height.toInt());
+    _rendering = true;
+    try {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      _bindUniforms(Size(w.toDouble(), h.toDouble()));
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+        Paint()..shader = _shader,
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(w, h);
+      picture.dispose();
 
-    _prevFrame?.dispose();
-    _prevFrame = image;
-    _renderingFrame = false;
+      final old = _front;
+      _front = image;
+      old?.dispose();
+    } catch (e) {
+      debugPrint('Shader render error: $e');
+    } finally {
+      _rendering = false;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    _dpr = MediaQuery.of(context).devicePixelRatio;
     return GestureDetector(
       onTap: widget.onTap,
       onDoubleTap: widget.onDoubleTap,
       child: RepaintBoundary(
         child: CustomPaint(
           painter: _ShaderPainter(
-            shader: _shader,
+            frame: _front,
             time: _time,
             audioData: widget.audioData,
             palette: widget.palette,
-            seed: widget.seed,
-            feedback: _feedback,
-            prevFrame: _prevFrame,
-            onBindUniforms: _bindUniforms,
-            onCapturePrevFrame: _capturePrevFrame,
+            onRender: _render,
           ),
           size: Size.infinite,
         ),
@@ -191,50 +217,42 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   @override
   void dispose() {
     _ticker.dispose();
-    _prevFrame?.dispose();
+    _front?.dispose();
+    _dummy?.dispose();
     super.dispose();
   }
 }
 
 class _ShaderPainter extends CustomPainter {
-  final ui.FragmentShader? shader;
+  final ui.Image? frame;
   final double time;
   final AudioDataProvider audioData;
   final SFPalette palette;
-  final int seed;
-  final FeedbackState feedback;
-  final ui.Image? prevFrame;
-  final void Function(Size) onBindUniforms;
-  final Future<void> Function(Size) onCapturePrevFrame;
+  final Future<void> Function(Size) onRender;
 
   _ShaderPainter({
-    required this.shader,
+    required this.frame,
     required this.time,
     required this.audioData,
     required this.palette,
-    required this.seed,
-    required this.feedback,
-    required this.prevFrame,
-    required this.onBindUniforms,
-    required this.onCapturePrevFrame,
+    required this.onRender,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (shader == null) {
-      // Fallback: simple FFT bars while shader is loading
+    if (frame != null) {
+      canvas.drawImageRect(
+        frame!,
+        Rect.fromLTWH(0, 0, frame!.width.toDouble(), frame!.height.toDouble()),
+        Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..filterQuality = FilterQuality.low,
+      );
+    } else {
       _paintFallback(canvas, size);
-      return;
     }
 
-    onBindUniforms(size);
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, size.width, size.height),
-      Paint()..shader = shader,
-    );
-
-    // Kick off prev-frame capture for next tick (fire-and-forget)
-    onCapturePrevFrame(size);
+    // Schedule the next offscreen render (fire-and-forget, self-guarded).
+    onRender(size);
   }
 
   void _paintFallback(Canvas canvas, Size size) {
@@ -265,10 +283,5 @@ class _ShaderPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ShaderPainter old) =>
-      old.time != time ||
-      old.shader != shader ||
-      old.prevFrame != prevFrame ||
-      old.seed != seed ||
-      old.palette != palette;
+  bool shouldRepaint(_ShaderPainter old) => true;
 }
