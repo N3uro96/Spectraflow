@@ -21,221 +21,176 @@ uniform float u_fb_rotation;
 uniform float u_fb_decay;
 uniform float u_fb_warp_x;
 uniform float u_fb_warp_y;
-
 uniform sampler2D u_prev_frame;
 
 out vec4 fragColor;
 
+const float PI  = 3.14159265;
+const float TAU = 6.28318530;
+
+float dna(float salt) {
+    float n = fract(u_seed * 5.96046448e-8);
+    return fract(sin(n * 92.7463 + salt * 311.7) * 43758.5453);
+}
+
+// Hash pro Kachel (deterministisch aus Zellkoordinate)
+float ch(vec2 c, float salt) {
+    return fract(sin(dot(c, vec2(127.1, 311.7)) + salt * 74.7) * 43758.5453);
+}
+
 vec3 pal(float t) {
-  t = clamp(t, 0.0, 1.0);
-  if (t < 0.333) return mix(u_pal_shadow, u_pal_low,       t * 3.0);
-  if (t < 0.667) return mix(u_pal_low,    u_pal_high,      (t - 0.333) * 3.0);
-                  return mix(u_pal_high,   u_pal_highlight, (t - 0.667) * 3.0);
+    t = clamp(t, 0.0, 1.0);
+    if (t < 0.333) return mix(u_pal_shadow,    u_pal_low,       t * 3.0);
+    if (t < 0.667) return mix(u_pal_low,        u_pal_high,      (t - 0.333) * 3.0);
+    return               mix(u_pal_high,        u_pal_highlight, (t - 0.667) * 3.0);
 }
 
-float hash_seed(float seed, float salt) {
-  return fract(sin(seed * 12.9898 + salt * 78.233) * 43758.5453);
-}
-
-float hash11(float p) {
-  p = fract(p * 0.1031); p *= p + 33.33; return fract(p * (p + p));
-}
-
-vec2 cell_square(vec2 p) {
-  vec2 f = fract(p) - 0.5;
-  float check = mod(floor(p.x) + floor(p.y), 2.0);
-  float edge = min(abs(f.x), abs(f.y)) * 2.0;
-  return vec2(check, edge);
-}
-
-vec2 cell_hex(vec2 p) {
-  p.x += p.y * 0.5774;
-  vec2 h = floor(p);
-  float check = mod(h.x + h.y, 2.0);
-  vec2 f = fract(p) - 0.5;
-  float edge = min(abs(f.x), abs(f.y)) * 2.0;
-  return vec2(check, edge);
-}
-
-vec2 cell_triangle(vec2 p) {
-  vec2 f = fract(p);
-  float check = mod(floor(p.x) + floor(p.y) + step(f.x + f.y, 1.0), 2.0);
-  float e1 = min(f.x, 1.0 - f.x);
-  float e2 = min(f.y, 1.0 - f.y);
-  float e3 = min(abs(f.x + f.y - 1.0) * 0.707, 0.5);
-  float edge = min(e1, min(e2, e3)) * 2.0;
-  return vec2(check, edge);
-}
-
-vec2 cell_diamond(vec2 p) {
-  vec2 rot = vec2(p.x + p.y, p.x - p.y) * 0.7071;
-  vec2 f = fract(rot) - 0.5;
-  float check = mod(floor(rot.x) + floor(rot.y), 2.0);
-  float edge = min(abs(f.x), abs(f.y)) * 2.0;
-  return vec2(check, edge);
-}
-
-vec2 cell_radial(vec2 p, float sectors) {
-  float r = length(p);
-  float a = atan(p.y, p.x) / 6.28318 * sectors;
-  float check = mod(floor(r) + floor(a), 2.0);
-  float er = abs(fract(r) - 0.5) * 2.0;
-  float ea = abs(fract(a) - 0.5) * 2.0;
-  float edge = min(er, ea);
-  return vec2(check, edge);
-}
+mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 
 void main() {
-  float d_cell_type   = hash_seed(u_seed,  1.0);
-  float d_projection  = hash_seed(u_seed,  2.0);
-  float d_freq        = 3.0 + hash_seed(u_seed,  3.0) * 11.0;
-  float d_rotation    = (hash_seed(u_seed,  4.0) * 2.0 - 1.0) * 0.7;
-  float d_move_x      = (hash_seed(u_seed,  5.0) * 2.0 - 1.0);
-  float d_move_y      = (hash_seed(u_seed,  6.0) * 2.0 - 1.0);
-  float d_speed       = 0.08 + hash_seed(u_seed,  7.0) * 0.7;
-  float d_bass_freq   = hash_seed(u_seed,  8.0);
-  float d_bass_zoom   = hash_seed(u_seed,  9.0);
-  float d_bass_warp   = hash_seed(u_seed, 10.0);
-  float d_warp_str    = hash_seed(u_seed, 11.0) * 0.9;
-  float d_warp_freq   = 1.0 + hash_seed(u_seed, 12.0) * 5.0;
-  float d_color_style = hash_seed(u_seed, 13.0);
-  float d_color_speed = 0.05 + hash_seed(u_seed, 14.0) * 1.4;
-  float d_phase       = hash_seed(u_seed, 15.0) * 6.28318;
-  float d_mid_react   = 0.2 + hash_seed(u_seed, 16.0) * 0.9;
-  float d_high_react  = 0.2 + hash_seed(u_seed, 17.0) * 0.9;
-  float d_pulse_str   = 0.3 + hash_seed(u_seed, 18.0) * 1.3;
-  float d_stereo_str  = 0.03 + hash_seed(u_seed, 19.0) * 0.18;
-  float d_persp_str   = 0.3 + hash_seed(u_seed, 20.0) * 0.9;
+    vec2  fc  = FlutterFragCoord().xy;
+    vec2  res = vec2(u_width, u_height);
+    float asp = u_width / u_height;
 
-  vec2 uv_raw = FlutterFragCoord().xy / vec2(u_width, u_height);
-  vec2 uv = uv_raw * 2.0 - 1.0;
-  uv.x *= u_width / u_height;
+    // ── DNA ────────────────────────────────────────────────
+    float d_warp    = floor(dna(1.0) * 3.0);          // 0=Boden 1=Fisheye 2=Tuch
+    float d_gridx   = floor(dna(2.0) * 10.0) + 5.0;   // 5–14 Spalten
+    float d_gridy   = floor(dna(3.0) * 10.0) + 5.0;   // 5–14 Reihen
+    float d_skew    = (dna(4.0) - 0.5) * 0.8;          // Gitter-Scherung
+    float d_lognon  = dna(5.0);                         // log-/nicht-uniforme Verzerrung
+    float d_extr    = dna(6.0);                         // Extrusions-Stärke
+    float d_pulse   = dna(7.0);                         // Pulsier-Stärke
+    float d_glitch  = dna(8.0);                         // Glitch-Shift-Stärke
+    float d_flip    = dna(9.0) > 0.4 ? 1.0 : 0.0;      // Beat-Farb-Flip an/aus
+    float d_rotchance = dna(10.0) * 0.18;              // selten: Kachel-Rotation
+    float d_colspd  = dna(11.0) * 0.3 + 0.04;
+    float d_scroll  = (dna(12.0) - 0.5) * 0.6;          // Gitter-Scroll
 
-  vec2 fb = uv_raw - 0.5;
-  fb /= u_fb_zoom;
-  float co = cos(-u_fb_rotation), si = sin(-u_fb_rotation);
-  fb = vec2(fb.x * co - fb.y * si, fb.x * si + fb.y * co);
-  fb.x += sin(fb.y * 8.0 + u_time * 0.7) * u_fb_warp_x;
-  fb.y += cos(fb.x * 8.0 - u_time * 0.5) * u_fb_warp_y;
-  vec2 fb_uv = fb + 0.5;
-  vec2 ef = smoothstep(vec2(0.0), vec2(0.04), fb_uv)
-          * (vec2(1.0) - smoothstep(vec2(0.96), vec2(1.0), fb_uv));
-  vec3 feedback = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb
-                * u_fb_decay * 0.35 * (ef.x * ef.y);
+    // ── Beat ───────────────────────────────────────────────
+    float beat_phase = fract(u_time * max(u_bpm, 60.0) / 60.0);
+    float beat       = exp(-beat_phase * 6.0) * smoothstep(0.1, 0.6, u_bass);
+    float beatHard   = step(0.5, exp(-beat_phase * 14.0));  // harter On/Off-Puls
 
-  float beat_dur = 60.0 / max(u_bpm, 60.0);
-  float beat_count = floor(u_time / beat_dur);
-  float beat_phase = fract(u_time / beat_dur);
-  float beat_kick = exp(-beat_phase * 8.0);
+    // ── UV / Raum-Verzerrung (Seed wählt) ─────────────────
+    vec2 uv_raw = fc / res;
+    vec2 p      = (uv_raw - 0.5) * vec2(asp, 1.0);
 
-  float lr_diff = u_bass_right - u_bass_left;
-  uv.x -= lr_diff * d_stereo_str * u_stereo;
+    // Stereo: linke Hälfte = L, rechte = R
+    bool  isLeft   = uv_raw.x < 0.5;
+    float chBass   = isLeft ? u_bass_left  : u_bass_right;
+    float sideBass = isLeft ? u_bass_left  : u_bass_right;
 
-  float rot = u_time * d_rotation * 0.1 + u_mid * d_mid_react * 0.3;
-  float cr = cos(rot), sr = sin(rot);
-  uv = vec2(uv.x * cr - uv.y * sr, uv.x * sr + uv.y * cr);
-
-  float bass_zoom_fac = 1.0 + u_bass * d_bass_zoom * 0.5 + beat_kick * d_pulse_str * 0.35;
-  uv /= bass_zoom_fac;
-
-  vec2 grid_uv;
-  bool is_sky = false;
-
-  if (d_projection < 0.4) {
-    grid_uv = uv;
-  } else if (d_projection < 0.7) {
-    float horizon = 0.05 + u_mid * d_mid_react * 0.08;
-    float py = uv.y - horizon;
-    if (py >= 0.0) {
-      is_sky = true;
-      grid_uv = uv;
+    vec2 board;
+    if (d_warp < 0.5) {
+        // Perspektivboden: y → Horizont
+        float horizon = 0.5;
+        float yy = (uv_raw.y - horizon);
+        // unterhalb Horizont = Boden; mappe in perspektivische Tiefe
+        float depth = 1.0 / max(abs(yy) * 2.0 + 0.06, 0.06);
+        board = vec2((uv_raw.x - 0.5) * depth * asp, depth + u_time * d_scroll);
+        // Energy wellt die Bodenfläche
+        board.y += sin(board.x * 2.0 + u_time) * u_energy * 0.4;
+    } else if (d_warp < 1.5) {
+        // Fisheye/Kugel
+        float r = length(p);
+        float bulge = 1.0 + u_bass * 0.6 + beat * 0.4;
+        float theta = atan(p.y, p.x);
+        float rr = asin(clamp(r * bulge, 0.0, 1.0)) / (PI * 0.5);
+        board = vec2(theta / PI, rr * 2.0 - u_time * d_scroll);
     } else {
-      float depth = d_persp_str / max(-py, 0.001);
-      float fz = depth + u_time * d_speed * 2.0 + u_bass * d_bass_freq * 0.8;
-      float fx = uv.x * depth + d_move_x * u_time * d_speed * 0.3;
-      grid_uv = vec2(fx, fz);
+        // Flexible Ebene / wehendes Tuch
+        board = p * 2.0;
+        board.x += sin(board.y * 3.0 + u_time * 1.2) * (0.1 + u_mid * 0.4);
+        board.y += cos(board.x * 2.5 - u_time) * (0.1 + u_energy * 0.3);
+        board.y += u_time * d_scroll;
     }
-  } else {
-    float r_uv = length(uv);
-    float a_uv = atan(uv.y, uv.x);
-    float depth = 1.0 / max(r_uv, 0.001);
-    float fz = depth * d_persp_str * 0.4 + u_time * d_speed * 1.5 + u_bass * d_bass_freq * 0.6;
-    grid_uv = vec2(a_uv / 6.28318 * d_freq, fz);
-  }
 
-  if (!is_sky && d_projection < 0.7) {
-    vec2 dir = normalize(vec2(d_move_x, d_move_y) + vec2(0.001));
-    grid_uv += dir * u_time * d_speed + dir * u_bass * d_bass_freq * 0.3;
-  }
+    // Scherung + (optional) log-nicht-uniforme Streckung
+    board.x += board.y * d_skew;
+    board.x = mix(board.x, sign(board.x) * log(1.0 + abs(board.x) * 2.0), d_lognon * 0.6);
 
-  float mid_warp = u_mid * d_mid_react * 0.15;
-  grid_uv.x += sin(grid_uv.y * d_warp_freq + u_time * 0.5 + d_phase) * (d_warp_str + mid_warp);
-  grid_uv.y += cos(grid_uv.x * d_warp_freq - u_time * 0.4) * (d_warp_str * 0.8 + mid_warp * 0.6);
+    // ── Gitterzellen ───────────────────────────────────────
+    vec2 grid = vec2(d_gridx, d_gridy);
+    vec2 gp   = board * grid;
 
-  float freq = d_freq * (1.0 + u_bass * d_bass_freq * 0.35);
+    // Glitch: ganze Reihen/Spalten gegeneinander verschieben
+    float rowShift = (ch(vec2(0.0, floor(gp.y)), 3.0) - 0.5)
+                   * d_glitch * (0.4 + chBass * 1.6) * beatHard;
+    gp.x += rowShift;
 
-  vec2 cell;
-  if (d_cell_type < 0.22) {
-    cell = cell_square(grid_uv * freq);
-  } else if (d_cell_type < 0.44) {
-    cell = cell_hex(grid_uv * freq);
-  } else if (d_cell_type < 0.66) {
-    cell = cell_triangle(grid_uv * freq);
-  } else if (d_cell_type < 0.85) {
-    cell = cell_radial(grid_uv, d_freq * 0.8);
-  } else {
-    cell = cell_diamond(grid_uv * freq);
-  }
+    vec2 cell = floor(gp);
+    vec2 f    = fract(gp);
 
-  float checker = cell.x;
-  float edge = clamp(cell.y, 0.0, 1.0);
+    // Kachel-Hashes
+    float hRot   = ch(cell, 1.0);
+    float hBand  = ch(cell, 2.0);                 // welches Frequenzband
+    float hPhase = ch(cell, 4.0);
 
-  float pulse_edge = clamp(edge + beat_kick * d_pulse_str * 0.5, 0.0, 1.0);
-  float edge_glow = clamp(0.04 / (1.0 - edge + 0.02), 0.0, 1.0) * u_high * d_high_react;
+    // Frequenzband-Wahl pro Kachel (Stereo-Kanal-spezifisch)
+    float band;
+    if (hBand < 0.4)      band = chBass;          // Bass (Stereo-Seite)
+    else if (hBand < 0.75) band = u_mid;
+    else                   band = u_high;
 
-  float hue_classic = fract(u_time * 0.04 * d_color_speed + d_phase / 6.28318 + beat_count * 0.07);
-  vec3 col_a = pal(hue_classic);
-  vec3 col_b = pal(fract(hue_classic + 0.5));
-  vec3 classic_col = mix(col_a * 0.15, col_b, checker) * (0.6 + pulse_edge * 0.5);
+    // Pulsieren: Kachel wächst/schrumpft mit ihrem Band
+    float pulse = (band * d_pulse + beat * 0.3);
+    float inset = 0.06 + pulse * 0.30;
 
-  vec3 neon_base = mix(u_pal_shadow * 0.1, u_pal_shadow * 0.2, checker);
-  vec3 neon_edge = pal(fract(hue_classic + checker * 0.5)) * (1.0 - smoothstep(0.0, 0.25, edge)) * 2.5;
-  vec3 neon_col = neon_base + neon_edge;
-  neon_col += edge_glow * u_pal_highlight * 1.5;
+    // Seltene Kachel-Rotation
+    vec2 fc2 = f - 0.5;
+    if (hRot < d_rotchance) {
+        float ra = (hRot * 30.0 + u_time * 0.5) ;
+        fc2 = rot2(ra) * fc2;
+    }
 
-  vec2 cell_id = floor(grid_uv * freq);
-  float cell_hash = hash11(dot(cell_id, vec2(127.1, 311.7)) + d_phase);
-  float hue_cell = fract(cell_hash + u_time * 0.05 * d_color_speed + beat_count * 0.06);
-  vec3 rainbow_col = pal(hue_cell) * (0.3 + pulse_edge * 0.8);
-  rainbow_col += edge_glow * u_pal_highlight;
+    // Kachel-Maske (Quadrat mit Inset → pulsierende Lücken)
+    vec2 q = abs(fc2) - (0.5 - inset);
+    float tile = 1.0 - smoothstep(0.0, 0.03, max(q.x, q.y));
 
-  vec3 col;
-  if (d_color_style < 0.5) {
-    col = mix(classic_col, neon_col, d_color_style * 2.0);
-  } else {
-    col = mix(neon_col, rainbow_col, (d_color_style - 0.5) * 2.0);
-  }
+    // Extrusion → Helligkeit (3D-EQ-Gefühl: höhere Kachel = heller)
+    float height = band * d_extr;
 
-  if (is_sky) {
-    vec3 sky = u_pal_shadow * 0.4 + u_pal_low * 0.3;
-    float horizon_glow = exp(-abs(uv.y) * 4.0) * u_energy;
-    sky += pal(hue_classic) * horizon_glow * 0.6;
-    col = sky;
-  }
+    // ── Schachbrett-Parität ────────────────────────────────
+    float parity = mod(cell.x + cell.y, 2.0);
+    // Beat-Flip: Parität kippt am harten Beat
+    if (d_flip > 0.5) parity = mod(parity + beatHard, 2.0);
 
-  vec2 uv_s = uv_raw * 2.0 - 1.0;
-  uv_s.x *= u_width / u_height;
-  float s_off = u_stereo * 0.04;
-  col += u_pal_low * exp(-length(uv_s + vec2(s_off * u_bass_left,  0.0)) * 5.0) * u_bass_left  * u_stereo * 0.18;
-  col += u_pal_low * exp(-length(uv_s - vec2(s_off * u_bass_right, 0.0)) * 5.0) * u_bass_right * u_stereo * 0.18;
+    // ── Farbe ──────────────────────────────────────────────
+    float baseT = parity > 0.5 ? 0.7 : 0.15;
+    float ct    = fract(baseT + height * 0.4 + ch(cell, 5.0) * 0.2
+                        + u_time * d_colspd * 0.05);
+    vec3  col   = pal(ct);
 
-  col += beat_kick * 0.05 * u_pal_highlight;
-  col *= 0.85 + u_energy * 0.35;
+    // Höhe/Extrusion als Helligkeit, Tile-Maske als Form
+    col = col * (0.10 + height * 1.3) * tile;
+    // Pulsierende Fugen leuchten schwach
+    col += u_pal_low * 0.04 * (1.0 - tile);
 
-  vec2 vig_uv = uv_raw * 2.0 - 1.0;
-  float vig = 1.0 - smoothstep(0.5, 1.5, dot(vig_uv, vig_uv));
-  col *= vig;
+    // Beat: Farbakzent auf aktiven Kacheln
+    col = mix(col, u_pal_highlight, beat * 0.35 * tile * step(0.3, band));
 
-  col = feedback + col;
-  fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    // High: Kantenglanz
+    col += u_pal_highlight * pow(tile, 8.0) * u_high * 0.4;
+
+    // Vignette
+    float vig = 1.0 - smoothstep(0.45, 1.15, length(uv_raw - 0.5) * 2.0);
+    col *= vig;
+
+    // ── Feedback / Trails ─────────────────────────────────
+    vec2 fb  = uv_raw - 0.5;
+    fb      /= u_fb_zoom;
+    fb       = rot2(-u_fb_rotation) * fb;
+    fb.x    += sin(fb.y * 8.0 + u_time) * u_fb_warp_x;
+    fb.y    += cos(fb.x * 8.0 - u_time) * u_fb_warp_y;
+    fb      += 0.5;
+
+    vec2  ef    = smoothstep(0.0, 0.04, fb) * (1.0 - smoothstep(0.96, 1.0, fb));
+    float efade = ef.x * ef.y;
+    vec3  prev  = texture(u_prev_frame, clamp(fb, 0.001, 0.999)).rgb;
+    vec3  trail = prev * u_fb_decay * efade;
+
+    col = max(col, trail * 0.85);
+    col = clamp(col, 0.0, 1.0);
+
+    fragColor = vec4(col, 1.0);
 }

@@ -28,3 +28,4 @@ flutter:
     - lib/shaders/tunnel.frag
     - lib/shaders/particles.frag
     - lib/shaders/kaleidoscope.frag
+    - lib/shaders/chessboard.frag
