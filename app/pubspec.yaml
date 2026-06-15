@@ -23,13 +23,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
-  shaders:
-    - lib/shaders/particles.frag
-    - lib/shaders/plasma.frag
-    - lib/shaders/smoke.frag
-    - lib/shaders/tunnel.frag
-    - lib/shaders/kaleidoscope.frag
-    - lib/shaders/chessboard.frag
-    - lib/shaders/fractal.frag
-    - lib/shaders/blinding_lights.frag
