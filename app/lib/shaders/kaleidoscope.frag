@@ -25,212 +25,163 @@ uniform sampler2D u_prev_frame;
 
 out vec4 fragColor;
 
-const float PI  = 3.14159265;
-const float TAU = 6.28318530;
+const float PI  = 3.14159265359;
+const float TAU = 6.28318530718;
 
+// ── HILFSFUNKTIONEN ────────────────────────────────────────
 float dna(float salt) {
-    float n = fract(u_seed * 5.96046448e-8);
-    return fract(sin(n * 92.7463 + salt * 311.7) * 43758.5453);
+    return fract(sin(salt * 92.7463 + u_seed * 13.37) * 43758.5453);
 }
 
-vec3 pal(float t) {
-    t = clamp(t, 0.0, 1.0);
-    if (t < 0.333) return mix(u_pal_shadow,    u_pal_low,       t * 3.0);
-    if (t < 0.667) return mix(u_pal_low,        u_pal_high,      (t - 0.333) * 3.0);
-    return               mix(u_pal_high,        u_pal_highlight, (t - 0.667) * 3.0);
+vec3 get_palette(float t) {
+    t = fract(t);
+    vec3 col = mix(u_pal_shadow, u_pal_low, smoothstep(0.0, 0.33, t));
+    col = mix(col, u_pal_high, smoothstep(0.33, 0.66, t));
+    col = mix(col, u_pal_highlight, smoothstep(0.66, 1.0, t));
+    return col;
 }
 
-mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
-
-// ── SDF-Primitive ─────────────────────────────────────────
-float sdCircle(vec2 p, float r) { return length(p) - r; }
-
-float sdBox(vec2 p, vec2 b) {
-    vec2 d = abs(p) - b;
-    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+mat2 rot2(float a) { 
+    float c = cos(a), s = sin(a); 
+    return mat2(c, -s, s, c); 
 }
 
-float sdNgon(vec2 p, float r, float n) {
-    float a   = atan(p.y, p.x);
-    float seg = TAU / n;
-    float aa  = mod(a, seg) - seg * 0.5;
-    return length(p) * cos(aa) - r * cos(seg * 0.5);
-}
+// ── 8 MATHEMATISCHE GRUNDSTRUKTUREN (Branchless-Ansatz) ────
+float get_base_pattern(vec2 p, float style_id, float r, float a) {
+    // Style 0: Organische Wellenringe
+    float s0 = sin(r * 15.0 - u_time * 2.0) * cos(a * 4.0);
+    // Style 1: Scharfe Zahnräder
+    float s1 = smoothstep(0.4, 0.5, r + sin(a * 10.0) * 0.1);
+    // Style 2: Geometrisches Gitter
+    float s2 = sin(p.x * 20.0) * cos(p.y * 20.0);
+    // Style 3: Strahlende Sterne
+    float s3 = exp(-r * 3.0) * (1.0 + cos(a * 8.0) * 0.5);
+    // Style 4: Hypnotische Spirale
+    float s4 = sin(r * 25.0 - a * 3.0 - u_time * 3.0);
+    // Style 5: Fraktale Zellen (Voronoi-Style)
+    float s5 = abs(sin(r * 10.0) * sin(a * 5.0)) + abs(cos(r * 15.0));
+    // Style 6: Zickzack-Labyrinth
+    float s6 = abs(fract(r * 5.0 + a * 2.0) - 0.5) * 2.0;
+    // Style 7: Audio-Pulsar (stark frequenzabhängig)
+    float s7 = sin(r * (10.0 + u_mid * 20.0)) * cos(a * (2.0 + u_high * 10.0));
 
-float sdStar(vec2 p, float r, float n, float m) {
-    // m: Spitzigkeit 0..1
-    float a   = atan(p.y, p.x);
-    float seg = TAU / n;
-    float aa  = mod(a, seg) - seg * 0.5;
-    float rr  = r * mix(1.0, 0.4, m) * (1.0 + m * cos(aa * n));
-    return length(p) - mix(r, rr, 0.6);
-}
-
-float sdRing(vec2 p, float r, float w) {
-    return abs(length(p) - r) - w;
-}
-
-float sdCross(vec2 p, float r, float w) {
-    vec2 q = abs(p);
-    return min(max(q.x - w, q.y - r), max(q.y - w, q.x - r));
-}
-
-float sdPetal(vec2 p, float r, float n) {
-    float a = atan(p.y, p.x);
-    float rad = r * (0.5 + 0.5 * abs(sin(a * n * 0.5)));
-    return length(p) - rad;
-}
-
-// ── 64 Grundformen: 16 Familien × 4 Varianten ─────────────
-// Gibt ein Füll-Feld 0..1 zurück (1 = innen/auf der Form).
-float baseShape(vec2 p, float id, float edge) {
-    float fam  = floor(mod(id, 16.0));
-    float var  = floor(id / 16.0);            // 0..3
-    float vk   = var * 0.25;                   // 0, .25, .5, .75
-    float d;
-
-    if      (fam <  1.0) d = sdCircle(p, 0.35 + vk * 0.25);
-    else if (fam <  2.0) d = sdNgon(p, 0.38, 3.0 + var);                  // Polygone 3..6
-    else if (fam <  3.0) d = sdNgon(p, 0.38, 6.0 + var * 2.0);            // Polygone 6..12
-    else if (fam <  4.0) d = sdStar(p, 0.40, 5.0 + var, 0.55);           // Sterne 5..8
-    else if (fam <  5.0) d = sdStar(p, 0.40, 6.0 + var * 2.0, 0.85);     // spitze Sterne
-    else if (fam <  6.0) d = sdRing(p, 0.28 + vk * 0.2, 0.04 + vk * 0.05);// Ringe
-    else if (fam <  7.0) d = sdBox(p, vec2(0.30 + vk * 0.2, 0.30 - vk * 0.12));
-    else if (fam <  8.0) d = sdBox(rot2(PI * 0.25) * p, vec2(0.30, 0.30 - vk * 0.2)); // Rauten
-    else if (fam <  9.0) d = sdCross(p, 0.38, 0.08 + vk * 0.08);          // Kreuze
-    else if (fam < 10.0) d = sdPetal(p, 0.36, 4.0 + var * 2.0);          // Blüten
-    else if (fam < 11.0) d = sdPetal(p, 0.36, 10.0 + var * 2.0);         // dichte Blüten
-    else if (fam < 12.0) {                                                 // verschachtelte Ringe
-        float r1 = sdRing(p, 0.18, 0.03);
-        float r2 = sdRing(p, 0.34 - vk * 0.1, 0.03);
-        d = min(r1, r2);
-    }
-    else if (fam < 13.0) {                                                 // Polygon-Loch
-        d = max(sdNgon(p, 0.40, 4.0 + var), -sdNgon(p, 0.22, 4.0 + var));
-    }
-    else if (fam < 14.0) {                                                 // Stern + Kern
-        d = min(sdStar(p, 0.42, 6.0 + var, 0.9), sdCircle(p, 0.10));
-    }
-    else if (fam < 15.0) {                                                 // gekreuzte Boxen
-        float b1 = sdBox(p, vec2(0.40, 0.07 + vk * 0.05));
-        float b2 = sdBox(p, vec2(0.07 + vk * 0.05, 0.40));
-        d = min(b1, b2);
-    }
-    else {                                                                 // Wellen-Mandala
-        float a = atan(p.y, p.x);
-        d = length(p) - (0.30 + 0.08 * sin(a * (4.0 + var * 3.0)));
-    }
-
-    return 1.0 - smoothstep(0.0, edge, d);
+    // Mischpult für die Styles
+    float c = 0.0;
+    c += s0 * step(0.0, style_id) * step(style_id, 0.5);
+    c += s1 * step(0.5, style_id) * step(style_id, 1.5);
+    c += s2 * step(1.5, style_id) * step(style_id, 2.5);
+    c += s3 * step(2.5, style_id) * step(style_id, 3.5);
+    c += s4 * step(3.5, style_id) * step(style_id, 4.5);
+    c += s5 * step(4.5, style_id) * step(style_id, 5.5);
+    c += s6 * step(5.5, style_id) * step(style_id, 6.5);
+    c += s7 * step(6.5, style_id);
+    
+    return c;
 }
 
 void main() {
-    vec2  fc  = FlutterFragCoord().xy;
-    vec2  res = vec2(u_width, u_height);
-    float asp = u_width / u_height;
-
-    // ── DNA ────────────────────────────────────────────────
-    float d_shape  = floor(dna(1.0) * 64.0);           // 0–63 Grundform
-    // Glockenverteilte Segmentzahl (Summe 4 Uniforms ≈ Normalverteilung)
-    float bell     = (dna(2.0) + dna(3.0) + dna(4.0) + dna(5.0)) * 0.25;
-    float d_seg    = floor(mix(3.0, 20.0, bell) + 0.5); // 3–20, glockenverteilt
-    float d_rotspd = (dna(6.0) - 0.5) * 0.6;            // Drehrichtung+geschw.
-    float d_zoom   = dna(7.0) * 0.8 + 0.7;              // Zoom-Level
-    float d_beatfx = floor(dna(8.0) * 3.0);             // 0=Segment 1=Ruck 2=Achse
-    float d_colspd = dna(9.0) * 0.4 + 0.05;             // Farb-Cycle
-    float d_double = dna(10.0) > 0.5 ? 1.0 : 0.0;       // Double-Fold an/aus
-
-    // ── Beat ───────────────────────────────────────────────
-    float beat_phase = fract(u_time * max(u_bpm, 60.0) / 60.0);
-    float beat       = exp(-beat_phase * 6.0) * smoothstep(0.1, 0.6, u_bass);
-
-    // ── UV / Polar ─────────────────────────────────────────
+    vec2 fc = FlutterFragCoord().xy;
+    vec2 res = vec2(u_width, u_height);
     vec2 uv_raw = fc / res;
-    vec2 p      = (uv_raw - 0.5) * vec2(asp, 1.0) * 2.0;
+    
+    // Aspektkorrigierte, zentrierte UVs
+    vec2 uv = (fc - res * 0.5) / min(u_width, u_height);
 
-    // Stereo: Kaleidoskop-Zentrum verschiebt sich L/R
-    p.x -= (u_bass_left - u_bass_right) * 0.25;
+    // ── 1. GENETISCHER CODE (64 Shapes Matrix) ─────────────
+    // Generiert eine ID von 0 bis 63
+    float d_shape_id = floor(dna(1.0) * 64.0);
+    
+    // Teilt die ID in Symmetrie (3 bis 10 Achsen) und Style (0 bis 7)
+    float d_symmetry = mod(d_shape_id, 8.0) + 3.0; 
+    float d_style    = floor(d_shape_id / 8.0);
+    
+    float d_rotation_speed = (dna(2.0) - 0.5) * 2.0;
+    float d_color_shift    = dna(3.0) * 2.0;
 
-    // Energy + Bass-Kick: Atem-Zoom
-    p *= d_zoom / (1.0 + u_energy * 0.3 + beat * 0.25);
+    // ── 2. AUDIO & BEAT REAKTIVITÄT ────────────────────────
+    // Takt-Erkennung
+    float beat_phase = fract(u_time * (max(u_bpm, 60.0) / 60.0));
+    // Scharfer Impuls beim Beat-Start, verstärkt durch Bass
+    float beat_pulse = exp(-beat_phase * 6.0) * u_bass;
 
-    float r = length(p);
-    float a = atan(p.y, p.x);
+    // Stereo-Paning (verschiebt das Kaleidoskop-Zentrum)
+    float pan = (u_bass_left - u_bass_right) * 0.2;
+    vec2 center = vec2(pan, 0.0);
+    uv -= center;
 
-    // ── Beat-Effekte (alle drei, Seed wählt) ──────────────
-    float seg = d_seg;
-    if (d_beatfx < 0.5) {
-        // Segmentzahl springt am Beat
-        seg = d_seg + floor(beat * d_seg * 0.8);
-    }
-    float rot = u_time * d_rotspd;
-    if (d_beatfx < 1.5 && d_beatfx >= 0.5) {
-        // Rotations-Ruck
-        rot += beat * 1.2;
-    }
-    float axis = 0.0;
-    if (d_beatfx >= 1.5) {
-        // Faltachse verschiebt sich
-        axis = beat * 0.6;
-    }
+    // Globaler Kaleidoskop-Zoom basierend auf Energie
+    uv *= 1.0 - u_energy * 0.15;
 
-    a += rot;
+    // ── 3. KALEIDOSKOP-FALTUNG (Der Raum wird gespiegelt) ──
+    float r = length(uv);
+    float a = atan(uv.y, uv.x);
 
-    // ── Kaleidoskop-Faltung ───────────────────────────────
-    float segAng = TAU / seg;
-    a = mod(a + axis, segAng);
-    a = abs(a - segAng * 0.5);                 // Spiegelung im Segment
+    // Basis-Rotation des gesamten Kaleidoskops
+    a += u_time * d_rotation_speed * (0.5 + u_energy * 0.5);
 
-    // Double-Fold: zweite Spiegelung für komplexere Symmetrie
-    if (d_double > 0.5) {
-        a = abs(a - segAng * 0.25);
-    }
+    // BEAT BREAK: Auf dem Kickdrum-Schlag "bricht" die Symmetrie auf
+    // Wir verschieben den Winkel ruckartig auf Basis des Beats und der Mitten
+    a += beat_pulse * sin(r * 20.0) * 0.2;
+    
+    // Die eigentliche Spiegelungs-Mathematik (Polar Fold)
+    float segment_angle = TAU / d_symmetry;
+    // Raum in Kuchenstücke teilen
+    a = mod(a, segment_angle); 
+    // In der Mitte jedes Stücks spiegeln (Zick-Zack-Muster)
+    a = abs(a - segment_angle / 2.0); 
 
-    // Mid: Faltachsen-Wobble
-    a += sin(u_time * 1.3 + r * 4.0) * u_mid * 0.12;
+    // Zurück in kartesische Koordinaten für den geknickten Raum
+    vec2 folded_p = r * vec2(cos(a), sin(a));
 
-    // Zurück in kartesische Koordinaten (gefaltet)
-    vec2 kp = vec2(cos(a), sin(a)) * r;
+    // Mids verzerren den gefalteten Raum (Wobble-Effekt)
+    folded_p.x += sin(r * 15.0 - u_time * 3.0) * u_mid * 0.05;
 
-    // ── Grundform sampeln (mit Wiederholung in der Tiefe) ─
-    float edge = 0.015 + u_high * 0.02;        // High schärft Kanten
-    // leichtes Tiling für reicheres Muster
-    vec2 sp = kp * (1.0 + sin(r * 3.0 - u_time) * 0.06);
-    float shape  = baseShape(sp, d_shape, edge);
-    // zweite, kleinere Instanz für Verschachtelung
-    float shape2 = baseShape(kp * 1.8, d_shape, edge) * 0.5;
-    float field  = max(shape, shape2);
+    // ── 4. MUSTER & FARBE ──────────────────────────────────
+    // Das gewählte Grundmuster berechnen
+    float pattern = get_base_pattern(folded_p, d_style, r, a);
+    
+    // High-Frequenzen lassen die Kanten schärfer aufblitzen
+    float sharp = 0.5 + u_high * 0.5;
+    pattern = smoothstep(0.0 - sharp, 0.0 + sharp, pattern);
 
-    // ── Farbe ──────────────────────────────────────────────
-    float ct  = fract(field * 0.5 + r * 0.4 + u_time * d_colspd * 0.06 + a * 0.1);
-    vec3  col = pal(ct);
-    col = col * (0.12 + field * 1.15);
+    // Farbauswahl basierend auf Distanz, Muster und Takt
+    float color_t = r * 1.5 - u_time * 0.2 + d_color_shift + pattern * 0.3;
+    
+    // Bass-Flashes auf die Farbpalette anwenden
+    color_t += beat_pulse * 0.4;
+    
+    vec3 col = get_palette(color_t);
+    
+    // Kontrast und Helligkeit
+    col *= pattern * (0.6 + u_energy * 0.4 + beat_pulse * 0.8);
 
-    // Bass-Kick: Farbakzent + Aufblitzen der Kanten
-    col = mix(col, u_pal_highlight, beat * 0.4 * field);
-
-    // High: Glanz auf den Formkanten
-    col += u_pal_highlight * pow(field, 6.0) * u_high * 0.6;
-
+    // Zentrum weich ausblenden
+    col *= smoothstep(0.0, 0.1, r);
     // Vignette
-    float vig = 1.0 - smoothstep(0.5, 1.3, r);
-    col *= vig;
+    col *= smoothstep(1.2, 0.4, r);
 
-    // ── Feedback / Trails ─────────────────────────────────
-    vec2 fb  = uv_raw - 0.5;
-    fb      /= u_fb_zoom;
-    fb       = rot2(-u_fb_rotation) * fb;
-    fb.x    += sin(fb.y * 8.0 + u_time) * u_fb_warp_x;
-    fb.y    += cos(fb.x * 8.0 - u_time) * u_fb_warp_y;
-    fb      += 0.5;
+    // ── 5. FEEDBACK STATE (Glasige Echos) ──────────────────
+    vec2 fb_uv = uv_raw;
+    
+    // Kaleidoskop-Feedback-Zoom zum akustischen Zentrum
+    vec2 zoom_center = vec2(0.5) + center * 0.5 * (u_height/u_width);
+    fb_uv = (fb_uv - zoom_center) * (1.0 / u_fb_zoom) + zoom_center;
+    
+    fb_uv -= zoom_center;
+    fb_uv = rot2(u_fb_rotation) * fb_uv;
+    fb_uv += zoom_center;
+    
+    // Warp, getrieben von Mitten
+    fb_uv.x += sin(fb_uv.y * 10.0 + u_time) * u_fb_warp_x * (0.5 + u_mid);
+    fb_uv.y += cos(fb_uv.x * 10.0 - u_time) * u_fb_warp_y * (0.5 + u_mid);
+    
+    vec3 prev_col = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb;
+    prev_col *= u_fb_decay;
+    
+    // Max-Blend für scharfe, kristalline Spuren (statt weichem Additiv-Nebel)
+    col = max(col, prev_col * (0.8 + u_high * 0.2));
 
-    vec2  ef    = smoothstep(0.0, 0.04, fb) * (1.0 - smoothstep(0.96, 1.0, fb));
-    float efade = ef.x * ef.y;
-    vec3  prev  = texture(u_prev_frame, clamp(fb, 0.001, 0.999)).rgb;
-    vec3  trail = prev * u_fb_decay * efade;
-
-    col = max(col, trail * 0.9);
-    col = clamp(col, 0.0, 1.0);
-
-    fragColor = vec4(col, 1.0);
+    // Tonemapping
+    col = 1.0 - exp(-col);
+    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }

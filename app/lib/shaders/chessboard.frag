@@ -25,172 +25,218 @@ uniform sampler2D u_prev_frame;
 
 out vec4 fragColor;
 
-const float PI  = 3.14159265;
-const float TAU = 6.28318530;
+const float PI  = 3.14159265359;
+const float TAU = 6.28318530718;
 
+// ── DETERMINISTISCHE HASH-FUNKTIONEN ────────────────────
 float dna(float salt) {
-    float n = fract(u_seed * 5.96046448e-8);
-    return fract(sin(n * 92.7463 + salt * 311.7) * 43758.5453);
+    return fract(sin(salt * 92.7463 + u_seed * 13.37) * 43758.5453);
 }
 
-// Hash pro Kachel (deterministisch aus Zellkoordinate)
-float ch(vec2 c, float salt) {
-    return fract(sin(dot(c, vec2(127.1, 311.7)) + salt * 74.7) * 43758.5453);
+// 2D -> 1D Hash für Kacheln
+float hash21(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y * (1.0 + u_seed * 0.1));
 }
 
-vec3 pal(float t) {
-    t = clamp(t, 0.0, 1.0);
-    if (t < 0.333) return mix(u_pal_shadow,    u_pal_low,       t * 3.0);
-    if (t < 0.667) return mix(u_pal_low,        u_pal_high,      (t - 0.333) * 3.0);
-    return               mix(u_pal_high,        u_pal_highlight, (t - 0.667) * 3.0);
+vec3 get_palette(float t) {
+    t = fract(t);
+    vec3 col = mix(u_pal_shadow, u_pal_low, smoothstep(0.0, 0.33, t));
+    col = mix(col, u_pal_high, smoothstep(0.33, 0.66, t));
+    col = mix(col, u_pal_highlight, smoothstep(0.66, 1.0, t));
+    return col;
 }
 
-mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+mat2 rot2(float a) { 
+    float c = cos(a), s = sin(a); 
+    return mat2(c, -s, s, c); 
+}
 
 void main() {
-    vec2  fc  = FlutterFragCoord().xy;
-    vec2  res = vec2(u_width, u_height);
-    float asp = u_width / u_height;
-
-    // ── DNA ────────────────────────────────────────────────
-    float d_warp    = floor(dna(1.0) * 3.0);          // 0=Boden 1=Fisheye 2=Tuch
-    float d_gridx   = floor(dna(2.0) * 10.0) + 5.0;   // 5–14 Spalten
-    float d_gridy   = floor(dna(3.0) * 10.0) + 5.0;   // 5–14 Reihen
-    float d_skew    = (dna(4.0) - 0.5) * 0.8;          // Gitter-Scherung
-    float d_lognon  = dna(5.0);                         // log-/nicht-uniforme Verzerrung
-    float d_extr    = dna(6.0);                         // Extrusions-Stärke
-    float d_pulse   = dna(7.0);                         // Pulsier-Stärke
-    float d_glitch  = dna(8.0);                         // Glitch-Shift-Stärke
-    float d_flip    = dna(9.0) > 0.4 ? 1.0 : 0.0;      // Beat-Farb-Flip an/aus
-    float d_rotchance = dna(10.0) * 0.18;              // selten: Kachel-Rotation
-    float d_colspd  = dna(11.0) * 0.3 + 0.04;
-    float d_scroll  = (dna(12.0) - 0.5) * 0.6;          // Gitter-Scroll
-
-    // ── Beat ───────────────────────────────────────────────
-    float beat_phase = fract(u_time * max(u_bpm, 60.0) / 60.0);
-    float beat       = exp(-beat_phase * 6.0) * smoothstep(0.1, 0.6, u_bass);
-    float beatHard   = step(0.5, exp(-beat_phase * 14.0));  // harter On/Off-Puls
-
-    // ── UV / Raum-Verzerrung (Seed wählt) ─────────────────
+    vec2 fc = FlutterFragCoord().xy;
+    vec2 res = vec2(u_width, u_height);
     vec2 uv_raw = fc / res;
-    vec2 p      = (uv_raw - 0.5) * vec2(asp, 1.0);
+    
+    // Aspektkorrigierte, zentrierte UVs (-1 bis 1)
+    vec2 p = (fc - res * 0.5) / min(u_width, u_height);
 
-    // Stereo: linke Hälfte = L, rechte = R
-    bool  isLeft   = uv_raw.x < 0.5;
-    float chBass   = isLeft ? u_bass_left  : u_bass_right;
-    float sideBass = isLeft ? u_bass_left  : u_bass_right;
+    // ── 1. GENETIK (Die Regeln des Raums) ───────────────────
+    // Topologie: 0=Bodenplane, 1=Tunnel, 2=Kugel/Fisheye
+    float d_topology = floor(dna(1.0) * 3.0);
+    
+    // Gitter-Dichte (Anzahl der Kacheln)
+    float d_density  = floor(dna(2.0) * 12.0) + 4.0; 
+    
+    // Gitter-Verzerrung (Wellen, Wirbel, Scherung)
+    float d_warp_type = floor(dna(3.0) * 4.0);
+    float d_warp_str  = dna(4.0) * 2.0;
+    
+    // Farb-Logik: 0=Schachbrett, 1=Zufall pro Kachel, 2=Gradient
+    float d_color_mode = floor(dna(5.0) * 3.0);
+    
+    // Scroll-Geschwindigkeit und Richtung
+    float d_scroll_x = (dna(6.0) - 0.5) * 2.0;
+    float d_scroll_y = (dna(7.0) - 0.5) * 2.0;
 
-    vec2 board;
-    if (d_warp < 0.5) {
-        // Perspektivboden: y → Horizont
-        float horizon = 0.5;
-        float yy = (uv_raw.y - horizon);
-        // unterhalb Horizont = Boden; mappe in perspektivische Tiefe
-        float depth = 1.0 / max(abs(yy) * 2.0 + 0.06, 0.06);
-        board = vec2((uv_raw.x - 0.5) * depth * asp, depth + u_time * d_scroll);
-        // Energy wellt die Bodenfläche
-        board.y += sin(board.x * 2.0 + u_time) * u_energy * 0.4;
-    } else if (d_warp < 1.5) {
-        // Fisheye/Kugel
+    // ── 2. BEAT & AUDIO-DYNAMIK ─────────────────────────────
+    float t_bpm = u_time * (max(u_bpm, 60.0) / 60.0);
+    float beat_kick = exp(-fract(t_bpm) * 5.0) * u_bass; // Scharfer Impuls
+    float half_beat = step(0.5, fract(t_bpm * 0.5)); // Flippt alle 2 Beats
+
+    // Stereo-Trennung für den Bass
+    float local_bass = (p.x < 0.0) ? u_bass_left : u_bass_right;
+
+    // ── 3. RAUM-KRÜMMUNG (Topologie) ────────────────────────
+    vec2 space;
+    
+    if (d_topology < 0.5) {
+        // TOPOLOGIE 0: Unendliche 3D-Bodenplane (Mode 7 Style)
+        float horizon = 0.2 + u_mid * 0.1; // Horizont wackelt leicht
+        float y = p.y - horizon;
+        
+        // Verhindert Division durch Null und biegt den Horizont nach oben
+        float z = 1.0 / max(abs(y) + 0.05, 0.01); 
+        
+        space.x = p.x * z;
+        space.y = z;
+        
+        // Stereo-Panning verschiebt die Kamera
+        space.x -= (u_bass_left - u_bass_right) * 0.5 * z;
+    } 
+    else if (d_topology < 1.5) {
+        // TOPOLOGIE 1: Rechteckiger Cyber-Tunnel
+        float z = 1.0 / max(max(abs(p.x), abs(p.y)), 0.05);
+        
+        // Winkel bestimmt, auf welcher Wand wir sind
+        float angle = atan(p.y, p.x);
+        // Map Winkel zu 4 glatten Wänden
+        float wall_u = angle / (PI * 0.5); 
+        
+        space.x = wall_u;
+        space.y = z;
+    } 
+    else {
+        // TOPOLOGIE 2: Gekrümmte Linse / Wurmloch
         float r = length(p);
-        float bulge = 1.0 + u_bass * 0.6 + beat * 0.4;
-        float theta = atan(p.y, p.x);
-        float rr = asin(clamp(r * bulge, 0.0, 1.0)) / (PI * 0.5);
-        board = vec2(theta / PI, rr * 2.0 - u_time * d_scroll);
+        float a = atan(p.y, p.x);
+        
+        // Bass drückt die Linse nach außen
+        float lens = r / (1.0 - r * (0.5 + local_bass * 0.3));
+        
+        space.x = a / PI;
+        space.y = log(lens + 0.1);
+    }
+
+    // ── 4. GITTER-VERZERRUNG (Warp) ─────────────────────────
+    float anim_time = u_time * (0.5 + u_energy * 0.5);
+    
+    if (d_warp_type < 1.0) {
+        // Flüssige Wellen
+        space.x += sin(space.y * 3.0 + anim_time) * d_warp_str * u_mid;
+    } else if (d_warp_type < 2.0) {
+        // Zick-Zack Glitch
+        space.x += step(0.5, fract(space.y * 5.0)) * d_warp_str * beat_kick * 0.5;
+    } else if (d_warp_type < 3.0) {
+        // Scherung
+        space.x += space.y * d_warp_str * 0.5;
     } else {
-        // Flexible Ebene / wehendes Tuch
-        board = p * 2.0;
-        board.x += sin(board.y * 3.0 + u_time * 1.2) * (0.1 + u_mid * 0.4);
-        board.y += cos(board.x * 2.5 - u_time) * (0.1 + u_energy * 0.3);
-        board.y += u_time * d_scroll;
+        // Wirbelsturm (Rotation um die eigene Achse)
+        space = rot2(space.y * d_warp_str * u_mid) * space;
     }
 
-    // Scherung + (optional) log-nicht-uniforme Streckung
-    board.x += board.y * d_skew;
-    board.x = mix(board.x, sign(board.x) * log(1.0 + abs(board.x) * 2.0), d_lognon * 0.6);
+    // Scrolling anwenden
+    space.x += anim_time * d_scroll_x;
+    space.y -= anim_time * d_scroll_y + beat_kick * 0.5; // Springt nach vorn beim Beat
 
-    // ── Gitterzellen ───────────────────────────────────────
-    vec2 grid = vec2(d_gridx, d_gridy);
-    vec2 gp   = board * grid;
+    // ── 5. KACHEL-BERECHNUNG (Grid) ─────────────────────────
+    space *= d_density;
+    
+    // Aktuelle Kachel-ID (Integer-Koordinaten)
+    vec2 id = floor(space);
+    // Lokale UVs innerhalb der Kachel (0.0 bis 1.0)
+    vec2 grid_uv = fract(space);
+    
+    // Zentrum der Kachel für Maskierung (-0.5 bis 0.5)
+    vec2 cell_center = grid_uv - 0.5;
 
-    // Glitch: ganze Reihen/Spalten gegeneinander verschieben
-    float rowShift = (ch(vec2(0.0, floor(gp.y)), 3.0) - 0.5)
-                   * d_glitch * (0.4 + chBass * 1.6) * beatHard;
-    gp.x += rowShift;
+    // Jede Kachel bekommt eine zufällige "Höhe" basierend auf Audio
+    float cell_hash = hash21(id);
+    
+    // Teile Frequenzen auf die Kacheln auf
+    float cell_audio = 0.0;
+    if (cell_hash < 0.3) cell_audio = local_bass;
+    else if (cell_hash < 0.7) cell_audio = u_mid;
+    else cell_audio = u_high;
+    
+    // Kacheln extrudieren (kleiner werden) wenn sie laut sind
+    float extrusion = cell_audio * (0.4 + beat_kick * 0.4);
+    
+    // Kachel-Form zeichnen (Quadrat mit dynamischem Rand)
+    // Wenn Audio laut ist, wird die Kachel kleiner (Inset)
+    float edge = max(abs(cell_center.x), abs(cell_center.y));
+    float tile_mask = smoothstep(0.45 - extrusion, 0.4 - extrusion, edge);
 
-    vec2 cell = floor(gp);
-    vec2 f    = fract(gp);
+    // ── 6. FARBBRECHNUNG ────────────────────────────────────
+    float color_idx = 0.0;
+    
+    // Schachbrett-Muster (0 oder 1)
+    float checker = mod(id.x + id.y, 2.0);
+    // Invertiere das Schachbrett jeden 2. Beat
+    checker = abs(checker - half_beat);
 
-    // Kachel-Hashes
-    float hRot   = ch(cell, 1.0);
-    float hBand  = ch(cell, 2.0);                 // welches Frequenzband
-    float hPhase = ch(cell, 4.0);
-
-    // Frequenzband-Wahl pro Kachel (Stereo-Kanal-spezifisch)
-    float band;
-    if (hBand < 0.4)      band = chBass;          // Bass (Stereo-Seite)
-    else if (hBand < 0.75) band = u_mid;
-    else                   band = u_high;
-
-    // Pulsieren: Kachel wächst/schrumpft mit ihrem Band
-    float pulse = (band * d_pulse + beat * 0.3);
-    float inset = 0.06 + pulse * 0.30;
-
-    // Seltene Kachel-Rotation
-    vec2 fc2 = f - 0.5;
-    if (hRot < d_rotchance) {
-        float ra = (hRot * 30.0 + u_time * 0.5) ;
-        fc2 = rot2(ra) * fc2;
+    if (d_color_mode < 1.0) {
+        // Klassisches Schachbrett (zwei Farben im Wechsel)
+        color_idx = checker * 0.5 + cell_audio * 0.2;
+    } else if (d_color_mode < 2.0) {
+        // Chaos: Jede Kachel hat eine andere Basis-Farbe
+        color_idx = cell_hash + u_time * 0.1;
+    } else {
+        // Gradient: Farbe basiert auf Tiefe/Distanz
+        color_idx = space.y * 0.05 - u_time * 0.2;
     }
 
-    // Kachel-Maske (Quadrat mit Inset → pulsierende Lücken)
-    vec2 q = abs(fc2) - (0.5 - inset);
-    float tile = 1.0 - smoothstep(0.0, 0.03, max(q.x, q.y));
+    vec3 col = get_palette(color_idx);
+    
+    // Kacheln anwenden (Hintergrund ist schwarz/Schattenfarbe)
+    vec3 bg_color = u_pal_shadow * 0.2;
+    col = mix(bg_color, col, tile_mask);
+    
+    // Leuchtende Ränder (Wireframe-Effekt in den Fugen)
+    float wireframe = smoothstep(0.48, 0.5, edge);
+    col += u_pal_highlight * wireframe * u_high * 2.0;
+    
+    // Helligkeit basierend auf Audio der jeweiligen Kachel
+    col *= 0.5 + cell_audio + beat_kick * checker;
 
-    // Extrusion → Helligkeit (3D-EQ-Gefühl: höhere Kachel = heller)
-    float height = band * d_extr;
-
-    // ── Schachbrett-Parität ────────────────────────────────
-    float parity = mod(cell.x + cell.y, 2.0);
-    // Beat-Flip: Parität kippt am harten Beat
-    if (d_flip > 0.5) parity = mod(parity + beatHard, 2.0);
-
-    // ── Farbe ──────────────────────────────────────────────
-    float baseT = parity > 0.5 ? 0.7 : 0.15;
-    float ct    = fract(baseT + height * 0.4 + ch(cell, 5.0) * 0.2
-                        + u_time * d_colspd * 0.05);
-    vec3  col   = pal(ct);
-
-    // Höhe/Extrusion als Helligkeit, Tile-Maske als Form
-    col = col * (0.10 + height * 1.3) * tile;
-    // Pulsierende Fugen leuchten schwach
-    col += u_pal_low * 0.04 * (1.0 - tile);
-
-    // Beat: Farbakzent auf aktiven Kacheln
-    col = mix(col, u_pal_highlight, beat * 0.35 * tile * step(0.3, band));
-
-    // High: Kantenglanz
-    col += u_pal_highlight * pow(tile, 8.0) * u_high * 0.4;
+    // Dunkler Nebel in der Ferne (Tiefenunschärfe)
+    // space.y ist in den meisten Topologien die Tiefe
+    float depth_fog = clamp(space.y / (d_density * 2.0), 0.0, 1.0);
+    col = mix(col, u_pal_shadow * 0.1, depth_fog);
 
     // Vignette
-    float vig = 1.0 - smoothstep(0.45, 1.15, length(uv_raw - 0.5) * 2.0);
+    float vig = smoothstep(1.3, 0.3, length(uv_raw - 0.5) * 2.0);
     col *= vig;
 
-    // ── Feedback / Trails ─────────────────────────────────
-    vec2 fb  = uv_raw - 0.5;
-    fb      /= u_fb_zoom;
-    fb       = rot2(-u_fb_rotation) * fb;
-    fb.x    += sin(fb.y * 8.0 + u_time) * u_fb_warp_x;
-    fb.y    += cos(fb.x * 8.0 - u_time) * u_fb_warp_y;
-    fb      += 0.5;
+    // ── 7. FEEDBACK STATE (Motion Blur & Glow) ──────────────
+    vec2 fb_uv = uv_raw;
+    
+    vec2 zoom_center = vec2(0.5);
+    fb_uv = (fb_uv - zoom_center) * (1.0 / u_fb_zoom) + zoom_center;
+    
+    fb_uv -= zoom_center;
+    fb_uv = rot2(u_fb_rotation) * fb_uv;
+    fb_uv += zoom_center;
+    
+    fb_uv.x += sin(fb_uv.y * 5.0 + u_time) * u_fb_warp_x * u_mid;
+    fb_uv.y += cos(fb_uv.x * 5.0 - u_time) * u_fb_warp_y * u_mid;
+    
+    vec3 prev_col = texture(u_prev_frame, clamp(fb_uv, 0.001, 0.999)).rgb;
+    
+    // Additives Blending für langes Nachglühen der Kacheln
+    col = col + prev_col * u_fb_decay * (0.7 + u_energy * 0.3);
 
-    vec2  ef    = smoothstep(0.0, 0.04, fb) * (1.0 - smoothstep(0.96, 1.0, fb));
-    float efade = ef.x * ef.y;
-    vec3  prev  = texture(u_prev_frame, clamp(fb, 0.001, 0.999)).rgb;
-    vec3  trail = prev * u_fb_decay * efade;
-
-    col = max(col, trail * 0.85);
-    col = clamp(col, 0.0, 1.0);
-
-    fragColor = vec4(col, 1.0);
+    // Tonemapping
+    col = 1.0 - exp(-col);
+    fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
