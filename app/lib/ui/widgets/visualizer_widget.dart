@@ -7,25 +7,17 @@ import '../../core/fps_counter.dart';
 import '../../core/palette_data.dart';
 
 const List<String> kShaderPaths = [
-  'lib/shaders/particles.frag',
-  'lib/shaders/plasma.frag',
-  'lib/shaders/smoke.frag',
   'lib/shaders/tunnel.frag',
+  'lib/shaders/particles.frag',
   'lib/shaders/kaleidoscope.frag',
   'lib/shaders/chessboard.frag',
-  'lib/shaders/fractal.frag',
-  'lib/shaders/blinding_lights.frag',
 ];
 
 const List<String> kShaderNames = [
-  'Particles',
-  'Plasma',
-  'Smoke',
   'Tunnel',
+  'Particles',
   'Kaleidoscope',
   'Chessboard',
-  'Fractal',
-  'Blinding Lights',
 ];
 
 class VisualizerWidget extends StatefulWidget {

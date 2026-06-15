@@ -32,7 +32,7 @@ class TextureManager {
   bool      _useA   = true;
   bool      _busy   = false;
 
-  // Aktuelle Texturen für den Shader
+  // Aktuelle Texturen für den Visualizer
   ui.Image? get texLeft  => _useA ? _texA_left  : _texB_left;
   ui.Image? get texRight => _useA ? _texA_right : _texB_right;
   ui.Image? get texMid   => _useA ? _texA_mid   : _texB_mid;
