@@ -37,7 +37,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
   double _time = 0.0;
   Duration _lastTick = Duration.zero;
 
-  FragmentShader? _shader;
+  ui.FragmentShader? _shader;
   int _loadedShaderIndex = -1;
   bool _shaderLoading = false;
 
@@ -66,7 +66,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
     if (_shaderLoading || index == _loadedShaderIndex) return;
     _shaderLoading = true;
     try {
-      final program = await FragmentProgram.fromAsset(kShaderPaths[index]);
+      final program = await ui.FragmentProgram.fromAsset(kShaderPaths[index]);
       if (!mounted) return;
       setState(() {
         _shader = program.fragmentShader();
@@ -197,7 +197,7 @@ class _VisualizerWidgetState extends State<VisualizerWidget>
 }
 
 class _ShaderPainter extends CustomPainter {
-  final FragmentShader? shader;
+  final ui.FragmentShader? shader;
   final double time;
   final AudioDataProvider audioData;
   final SFPalette palette;
