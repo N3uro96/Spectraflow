@@ -27,3 +27,4 @@ flutter:
   shaders:
     - lib/shaders/tunnel.frag
     - lib/shaders/particles.frag
+    - lib/shaders/kaleidoscope.frag
